@@ -10,6 +10,7 @@ import (
 
 // Mock holds an array of all of the interfaces within a file.
 type Mock struct {
+	Package    string
 	Interfaces []Interface
 }
 
@@ -29,8 +30,9 @@ type Method struct {
 
 // Value represents an arg or return value.
 type Value struct {
-	Name string
-	Type string
+	Name       string
+	Type       string
+	IsVariadic bool
 }
 
 var fset *token.FileSet
@@ -49,9 +51,9 @@ func ReadFile(reader io.Reader) *Mock {
 	// ast.Print(fset, node)
 
 	for _, d := range genDecls(node) {
-		specTok := interfaceSpecTokens(d)
+		specToks := interfaceSpecTokens(d)
 
-		for _, specTok := range specTok {
+		for _, specTok := range specToks {
 			mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok))
 		}
 	}
@@ -135,6 +137,9 @@ func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 		args = append(args, parseFieldTok(arg, "arg", ai)...)
 	}
 
+	if tok.Results == nil {
+		return args, nil
+	}
 	rets := []Value{}
 	for ri, ret := range tok.Results.List {
 		rets = append(rets, parseFieldTok(ret, "ret", ri)...)
@@ -147,16 +152,55 @@ func parseFieldTok(tok *ast.Field, fieldType string, i int) []Value {
 	value := []Value{}
 
 	var typ string
-	if typeTok, ok := tok.Type.(*ast.Ident); ok {
+	isVar := false
+	switch typeTok := tok.Type.(type) {
+	case *ast.Ident:
 		typ = typeTok.Name
+	case *ast.Ellipsis:
+		if idenTok, ok := typeTok.Elt.(*ast.Ident); ok {
+			typ = idenTok.Name
+			isVar = true
+		}
+	case *ast.SelectorExpr:
+		packTok, _ := typeTok.X.(*ast.Ident)
+		typ = fmt.Sprintf("%s.%s", packTok.Name, typeTok.Sel.Name)
+	case *ast.ArrayType:
+
 	}
 
+	ast.Print(fset, tok)
 	if len(tok.Names) == 0 {
-		return append(value, Value{Name: fmt.Sprintf("%s%d", fieldType, i+1), Type: typ})
+		return append(value, Value{
+			Name:       fmt.Sprintf("%s%d", fieldType, i+1),
+			Type:       typ,
+			IsVariadic: isVar,
+		})
 	}
 	for _, idenTok := range tok.Names {
-		value = append(value, Value{Name: idenTok.Name, Type: typ})
+		value = append(value, Value{
+			Name:       idenTok.Name,
+			Type:       typ,
+			IsVariadic: isVar,
+		})
 	}
 
 	return value
+}
+
+func parseType(tok ast.Expr) (string, bool) {
+	switch typeTok := tok.(type) {
+	case *ast.Ident:
+		return typeTok.Name, false
+	case *ast.Ellipsis:
+		typ, _ := parseType(typeTok.Elt)
+		return typ, true
+	case *ast.SelectorExpr:
+		pack, _ := parseType(typeTok.X)
+		return fmt.Sprintf("%s.%s", pack, typeTok.Sel.Name), false
+	case *ast.ArrayType:
+		typ, _ := parseType(typeTok.Elt)
+		return fmt.Sprintf("[]%s", typ), false
+	}
+
+	return "", false
 }

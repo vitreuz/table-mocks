@@ -144,9 +144,9 @@ func TestReadFile(t *testing.T) {
 
 		return checks
 	}
-	interfaceMethodArgExpectValue := func(name, typ string) checkOutInterfaceMethodArg {
+	interfaceMethodArgExpectValue := func(name, typ string, isVariadic bool) checkOutInterfaceMethodArg {
 		return func(iName, mName string, ai int, arg Value) []error {
-			expectValue := Value{Name: name, Type: typ}
+			expectValue := Value{Name: name, Type: typ, IsVariadic: isVariadic}
 			if !reflect.DeepEqual(arg, expectValue) {
 				return []error{fmt.Errorf(
 					"expected %s.%s arg %d to be %+v but got %+v",
@@ -221,7 +221,7 @@ func TestReadFile(t *testing.T) {
 					interfaceMethodHasRetCount(1),
 				),
 				checkInterfaceMethodArg(0, 0, 0,
-					interfaceMethodArgExpectValue("d", "string"),
+					interfaceMethodArgExpectValue("d", "string", false),
 				),
 				checkInterfaceMethodRet(0, 0, 0,
 					interfaceMethodRetExpectValue("e", "string"),
@@ -250,10 +250,10 @@ func TestReadFile(t *testing.T) {
 					interfaceMethodHasRetCount(1),
 				),
 				checkInterfaceMethodArg(0, 0, 0,
-					interfaceMethodArgExpectValue("arg1", "string"),
+					interfaceMethodArgExpectValue("arg1", "string", false),
 				),
 				checkInterfaceMethodArg(0, 0, 1,
-					interfaceMethodArgExpectValue("arg2", "string"),
+					interfaceMethodArgExpectValue("arg2", "string", false),
 				),
 				checkInterfaceMethodRet(0, 0, 0,
 					interfaceMethodRetExpectValue("ret1", "int"),
@@ -282,10 +282,10 @@ func TestReadFile(t *testing.T) {
 					interfaceMethodHasRetCount(2),
 				),
 				checkInterfaceMethodArg(0, 0, 0,
-					interfaceMethodArgExpectValue("d", "string"),
+					interfaceMethodArgExpectValue("d", "string", false),
 				),
 				checkInterfaceMethodArg(0, 0, 1,
-					interfaceMethodArgExpectValue("e", "string"),
+					interfaceMethodArgExpectValue("e", "string", false),
 				),
 				checkInterfaceMethodRet(0, 0, 0,
 					interfaceMethodRetExpectValue("f", "int"),
@@ -360,6 +360,116 @@ func TestReadFile(t *testing.T) {
 		// 		),
 		// 	),
 		// },
+		{
+			"Variadic args",
+			strings.NewReader(`
+				package a
+
+				type B interface {
+					C(...string) string
+				}`,
+			),
+			check(
+				checkMock(
+					hasInterfaceCount(1),
+				),
+				checkInterface(0,
+					interfaceHasName("B"),
+					interfaceHasMethodCount(1),
+				),
+				checkInterfaceMethod(0, 0,
+					interfaceMethodHasName("C"),
+					interfaceMethodHasArgCount(1),
+					interfaceMethodHasRetCount(1),
+				),
+				checkInterfaceMethodArg(0, 0, 0,
+					interfaceMethodArgExpectValue("arg1", "string", true),
+				),
+				checkInterfaceMethodRet(0, 0, 0,
+					interfaceMethodRetExpectValue("ret1", "string"),
+				),
+			),
+		}, {
+			"No returns method",
+			strings.NewReader(`
+				package a
+
+				type B interface{
+					C()
+				}`,
+			),
+			check(
+				checkMock(
+					hasInterfaceCount(1),
+				),
+				checkInterface(0,
+					interfaceHasName("B"),
+					interfaceHasMethodCount(1),
+				),
+				checkInterfaceMethod(0, 0,
+					interfaceMethodHasName("C"),
+					interfaceMethodHasArgCount(0),
+					interfaceMethodHasRetCount(0),
+				),
+			),
+		}, {
+			"Type value declared from other file",
+			strings.NewReader(`
+				package a
+
+				type B interface{
+					C(bytes.Buffer)
+				}
+				`,
+			),
+			check(
+				checkMock(
+					hasInterfaceCount(1),
+				),
+				checkInterface(0,
+					interfaceHasName("B"),
+					interfaceHasMethodCount(1),
+				),
+				checkInterfaceMethod(0, 0,
+					interfaceMethodHasName("C"),
+					interfaceMethodHasArgCount(1),
+					interfaceMethodHasRetCount(0),
+				),
+				checkInterfaceMethodArg(0, 0, 0,
+					interfaceMethodArgExpectValue("arg1", "bytes.Buffer", false),
+				),
+			),
+		}, {
+			"Array values",
+			strings.NewReader(`
+				package a
+
+				type B interface{
+					C([]string) []error
+				}
+				`,
+			),
+			check(
+				checkMock(
+					hasInterfaceCount(1),
+				),
+				checkInterface(0,
+					interfaceHasName("B"),
+					interfaceHasMethodCount(1),
+				),
+				checkInterfaceMethod(0, 0,
+					interfaceMethodHasName("C"),
+					interfaceMethodHasArgCount(1),
+					interfaceMethodHasRetCount(1),
+				),
+				checkInterfaceMethodArg(0, 0, 0,
+					interfaceMethodArgExpectValue("arg1", "[]string", false),
+				),
+				checkInterfaceMethodRet(0, 0, 0,
+					interfaceMethodRetExpectValue("arg1", "[]error"),
+				),
+			),
+		},
 	}
 
 	for _, tt := range tests {
