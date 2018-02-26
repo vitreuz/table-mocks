@@ -150,7 +150,7 @@ func TestReadFile(t *testing.T) {
 			if !reflect.DeepEqual(arg, expectValue) {
 				return []error{fmt.Errorf(
 					"expected %s.%s arg %d to be %+v but got %+v",
-					iName, mName, ai, arg, expectValue,
+					iName, mName, ai, expectValue, arg,
 				)}
 			}
 			return nil
@@ -181,7 +181,7 @@ func TestReadFile(t *testing.T) {
 			if !reflect.DeepEqual(ret, expectValue) {
 				return []error{fmt.Errorf(
 					"expected %s.%s ret %d to be %+v but got %+v",
-					iName, mName, ri, ret, expectValue,
+					iName, mName, ri, expectValue, ret,
 				)}
 			}
 			return nil
@@ -445,7 +445,7 @@ func TestReadFile(t *testing.T) {
 				package a
 
 				type B interface{
-					C([]string) []error
+					C([][]string, []bytes.Buffer) []error
 				}
 				`,
 			),
@@ -459,14 +459,17 @@ func TestReadFile(t *testing.T) {
 				),
 				checkInterfaceMethod(0, 0,
 					interfaceMethodHasName("C"),
-					interfaceMethodHasArgCount(1),
+					interfaceMethodHasArgCount(2),
 					interfaceMethodHasRetCount(1),
 				),
 				checkInterfaceMethodArg(0, 0, 0,
-					interfaceMethodArgExpectValue("arg1", "[]string", false),
+					interfaceMethodArgExpectValue("arg1", "[][]string", false),
+				),
+				checkInterfaceMethodArg(0, 0, 1,
+					interfaceMethodArgExpectValue("arg2", "[]bytes.Buffer", false),
 				),
 				checkInterfaceMethodRet(0, 0, 0,
-					interfaceMethodRetExpectValue("arg1", "[]error"),
+					interfaceMethodRetExpectValue("ret1", "[]error"),
 				),
 			),
 		},

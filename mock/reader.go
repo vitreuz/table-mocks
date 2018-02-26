@@ -151,24 +151,8 @@ func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 func parseFieldTok(tok *ast.Field, fieldType string, i int) []Value {
 	value := []Value{}
 
-	var typ string
-	isVar := false
-	switch typeTok := tok.Type.(type) {
-	case *ast.Ident:
-		typ = typeTok.Name
-	case *ast.Ellipsis:
-		if idenTok, ok := typeTok.Elt.(*ast.Ident); ok {
-			typ = idenTok.Name
-			isVar = true
-		}
-	case *ast.SelectorExpr:
-		packTok, _ := typeTok.X.(*ast.Ident)
-		typ = fmt.Sprintf("%s.%s", packTok.Name, typeTok.Sel.Name)
-	case *ast.ArrayType:
+	typ, isVar := parseType(tok.Type)
 
-	}
-
-	ast.Print(fset, tok)
 	if len(tok.Names) == 0 {
 		return append(value, Value{
 			Name:       fmt.Sprintf("%s%d", fieldType, i+1),
