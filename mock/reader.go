@@ -1,0 +1,162 @@
+package mock
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
+)
+
+// Mock holds an array of all of the interfaces within a file.
+type Mock struct {
+	Interfaces []Interface
+}
+
+// Interface represents a single instance of an interface.
+type Interface struct {
+	Name    string
+	Methods []Method
+}
+
+// Method represents a single interface method with all of its args and return
+// values.
+type Method struct {
+	Name string
+	Args []Value
+	Rets []Value
+}
+
+// Value represents an arg or return value.
+type Value struct {
+	Name string
+	Type string
+}
+
+var fset *token.FileSet
+
+// ReadFile is the primary parser for a file to get mocked. This method walks
+// along the file ast to create a Mock object. Interfaces with embedded fields
+// outside of this file is not currently supported.
+func ReadFile(reader io.Reader) *Mock {
+	fset = token.NewFileSet()
+	node, err := parser.ParseFile(fset, "", reader, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	mock := new(Mock)
+	// ast.Print(fset, node)
+
+	for _, d := range genDecls(node) {
+		specTok := interfaceSpecTokens(d)
+
+		for _, specTok := range specTok {
+			mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok))
+		}
+	}
+
+	return mock
+}
+
+func genDecls(node *ast.File) []*ast.GenDecl {
+	toks := []*ast.GenDecl{}
+
+	for _, d := range node.Decls {
+		if gd, ok := d.(*ast.GenDecl); ok {
+			toks = append(toks, gd)
+		}
+	}
+
+	return toks
+}
+
+// interfaceTokens returns ast.TypeSpec becuase the name of the interface can
+// only be pulled from the TypeSpec.
+func interfaceSpecTokens(node *ast.GenDecl) []*ast.TypeSpec {
+	toks := []*ast.TypeSpec{}
+
+	for _, spec := range node.Specs {
+		if tspec, ok := spec.(*ast.TypeSpec); ok {
+			if _, ok := tspec.Type.(*ast.InterfaceType); ok {
+				toks = append(toks, tspec)
+			}
+		}
+	}
+
+	return toks
+}
+
+func parseInterfaceToken(tok *ast.TypeSpec) Interface {
+	itfcTok := tok.Type.(*ast.InterfaceType)
+	methods := []Method{}
+
+	for _, methTok := range itfcTok.Methods.List {
+		if specType, ok := embeddedInterface(methTok); ok {
+			embedded := parseInterfaceToken(specType)
+			methods = append(methods, embedded.Methods...)
+			continue
+		}
+		methods = append(methods, parseMethodToken(methTok))
+	}
+
+	return Interface{Name: tok.Name.Name, Methods: methods}
+}
+
+func embeddedInterface(tok *ast.Field) (*ast.TypeSpec, bool) {
+	if len(tok.Names) == 0 {
+		if idenTok, ok := tok.Type.(*ast.Ident); ok {
+			if specTok, ok := idenTok.Obj.Decl.(*ast.TypeSpec); ok {
+				_, ok := specTok.Type.(*ast.InterfaceType)
+				return specTok, ok
+			}
+		}
+	}
+	return nil, false
+}
+
+func parseMethodToken(tok *ast.Field) Method {
+	var method Method
+
+	for _, idenTok := range tok.Names {
+		method.Name = idenTok.Name
+	}
+
+	if funcTok, ok := tok.Type.(*ast.FuncType); ok {
+		method.Args, method.Rets = parseFuncToken(funcTok)
+	}
+
+	return method
+}
+
+func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
+	args := []Value{}
+	for ai, arg := range tok.Params.List {
+		args = append(args, parseFieldTok(arg, "arg", ai)...)
+	}
+
+	rets := []Value{}
+	for ri, ret := range tok.Results.List {
+		rets = append(rets, parseFieldTok(ret, "ret", ri)...)
+	}
+
+	return args, rets
+}
+
+func parseFieldTok(tok *ast.Field, fieldType string, i int) []Value {
+	value := []Value{}
+
+	var typ string
+	if typeTok, ok := tok.Type.(*ast.Ident); ok {
+		typ = typeTok.Name
+	}
+
+	if len(tok.Names) == 0 {
+		return append(value, Value{Name: fmt.Sprintf("%s%d", fieldType, i+1), Type: typ})
+	}
+	for _, idenTok := range tok.Names {
+		value = append(value, Value{Name: idenTok.Name, Type: typ})
+	}
+
+	return value
+}
