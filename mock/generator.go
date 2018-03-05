@@ -35,7 +35,7 @@ func (m Mock) ToFile() *ast.File {
 	}
 
 	for _, ifce := range m.Interfaces {
-		_ = ifce
+		node.Decls = append(node.Decls, ifce.GenerateStructs()...)
 	}
 
 	return node

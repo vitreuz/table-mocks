@@ -87,7 +87,8 @@ import (
 	"time"
 )
 
-type Runner struct {}
+type Runner struct {
+}
 `,
 				)),
 			),
@@ -191,10 +192,8 @@ func TestGenerateStructs(t *testing.T) {
 	runMethod map[int]RunnerRunMethod
 	runMutex  sync.RWMutex
 }
-
 type RunnerRunMethod struct {
-	DistanceArg int
-
+	DistanceArg    int
 	Called         bool
 	DurationResult time.Duration
 	ErrResult      error
