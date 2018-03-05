@@ -24,11 +24,7 @@ func (m *Mock) addSyncImport() {
 }
 
 func (m Mock) ToFile() *ast.File {
-	node := &ast.File{
-		Name: &ast.Ident{
-			Name: m.Package,
-		},
-	}
+	node := &ast.File{Name: ast.NewIdent(m.Package)}
 
 	if len(m.Imports) > 1 {
 		node.Decls = m.toImports()
@@ -71,19 +67,17 @@ func (ifce Interface) generateInterfaceStruct() ast.Decl {
 	fieldList := []*ast.Field{}
 	for _, method := range ifce.Methods {
 		methField := &ast.Field{
-			Names: []*ast.Ident{&ast.Ident{Name: toMethodName(method.Name, "Method")}},
+			Names: []*ast.Ident{ast.NewIdent(toMethodName(method.Name, "Method"))},
 			Type: &ast.MapType{
-				Key: &ast.Ident{Name: "int"},
-				Value: &ast.Ident{
-					Name: toMethodStructName(ifce.Name, method.Name),
-				},
+				Key:   ast.NewIdent("int"),
+				Value: ast.NewIdent(toMethodStructName(ifce.Name, method.Name)),
 			},
 		}
 		methMutex := &ast.Field{
-			Names: []*ast.Ident{&ast.Ident{Name: toMethodName(method.Name, "Mutex")}},
+			Names: []*ast.Ident{ast.NewIdent(toMethodName(method.Name, "Mutex"))},
 			Type: &ast.SelectorExpr{
-				X:   &ast.Ident{Name: "sync"},
-				Sel: &ast.Ident{Name: "RWMutex"},
+				X:   ast.NewIdent("sync"),
+				Sel: ast.NewIdent("RWMutex"),
 			},
 		}
 
@@ -100,11 +94,8 @@ func (meth Method) generateMethodStruct(ifceName string) ast.Decl {
 	}
 
 	fieldList = append(fieldList, &ast.Field{
-		Names: []*ast.Ident{{
-			NamePos: 1,
-			Name:    "Called",
-		}},
-		Type: &ast.Ident{Name: "bool"},
+		Names: []*ast.Ident{ast.NewIdent("Called")},
+		Type:  ast.NewIdent("bool"),
 	})
 
 	for i, res := range meth.Rets {
@@ -125,7 +116,7 @@ func (value Value) generateValue(i int, isResult bool) *ast.Field {
 	}
 
 	return &ast.Field{
-		Names: []*ast.Ident{{Name: name}},
+		Names: []*ast.Ident{ast.NewIdent(name)},
 		Type:  value.Type,
 	}
 
@@ -149,7 +140,7 @@ func generateStruct(name string, fieldList []*ast.Field) *ast.GenDecl {
 		Tok: token.TYPE,
 		Specs: []ast.Spec{
 			&ast.TypeSpec{
-				Name: &ast.Ident{Name: name},
+				Name: ast.NewIdent(name),
 				Type: &ast.StructType{Fields: &ast.FieldList{List: fieldList}},
 			},
 		},

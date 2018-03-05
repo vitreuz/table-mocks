@@ -75,6 +75,11 @@ func TestGenerateFile(t *testing.T) {
 				Interfaces: []Interface{
 					{
 						Name: "Runner",
+						Methods: []Method{
+							{
+								Name: "Run",
+							},
+						},
 					},
 				},
 			},
@@ -88,6 +93,11 @@ import (
 )
 
 type Runner struct {
+	runMethod map[int]RunnerRunMethod
+	runMutex  sync.RWMutex
+}
+type RunnerRunMethod struct {
+	Called bool
 }
 `,
 				)),
