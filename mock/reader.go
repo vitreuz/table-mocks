@@ -11,6 +11,7 @@ import (
 // Mock holds an array of all of the interfaces within a file.
 type Mock struct {
 	Package    string
+	Imports    []string
 	Interfaces []Interface
 }
 
@@ -31,7 +32,7 @@ type Method struct {
 // Value represents an arg or return value.
 type Value struct {
 	Name       string
-	Type       string
+	Type       ast.Expr
 	IsVariadic bool
 }
 
@@ -48,7 +49,7 @@ func ReadFile(reader io.Reader) *Mock {
 	}
 
 	mock := new(Mock)
-	// ast.Print(fset, node)
+	ast.Print(fset, node)
 
 	for _, d := range genDecls(node) {
 		specToks := interfaceSpecTokens(d)
@@ -105,15 +106,26 @@ func parseInterfaceToken(tok *ast.TypeSpec) Interface {
 	return Interface{Name: tok.Name.Name, Methods: methods}
 }
 
+// embeddedInterface returns any embedded interfaces or false otherwise. An
+// embedded interface can be determined by checking the Names attribute. Methods
+// have a Names tokens, whereas embedded interfaces do not.
 func embeddedInterface(tok *ast.Field) (*ast.TypeSpec, bool) {
-	if len(tok.Names) == 0 {
-		if idenTok, ok := tok.Type.(*ast.Ident); ok {
-			if specTok, ok := idenTok.Obj.Decl.(*ast.TypeSpec); ok {
-				_, ok := specTok.Type.(*ast.InterfaceType)
-				return specTok, ok
-			}
-		}
+	if len(tok.Names) > 0 {
+		return nil, false
 	}
+
+	switch tokType := tok.Type.(type) {
+	case *ast.Ident:
+		if specTok, ok := tokType.Obj.Decl.(*ast.TypeSpec); ok {
+			_, ok := specTok.Type.(*ast.InterfaceType)
+			return specTok, ok
+		}
+	case *ast.SelectorExpr:
+
+		// ifaceName := tokType.Sel.Name
+
+	}
+
 	return nil, false
 }
 
@@ -134,7 +146,7 @@ func parseMethodToken(tok *ast.Field) Method {
 func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 	args := []Value{}
 	for ai, arg := range tok.Params.List {
-		args = append(args, parseFieldTok(arg, "arg", ai)...)
+		args = append(args, parseFieldToken(arg, "arg", ai)...)
 	}
 
 	if tok.Results == nil {
@@ -142,28 +154,28 @@ func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 	}
 	rets := []Value{}
 	for ri, ret := range tok.Results.List {
-		rets = append(rets, parseFieldTok(ret, "ret", ri)...)
+		rets = append(rets, parseFieldToken(ret, "ret", ri)...)
 	}
 
 	return args, rets
 }
 
-func parseFieldTok(tok *ast.Field, fieldType string, i int) []Value {
+func parseFieldToken(tok *ast.Field, fieldType string, i int) []Value {
 	value := []Value{}
 
-	typ, isVar := parseType(tok.Type)
+	_, isVar := parseType(tok.Type)
 
 	if len(tok.Names) == 0 {
 		return append(value, Value{
-			Name:       fmt.Sprintf("%s%d", fieldType, i+1),
-			Type:       typ,
+			Name: fmt.Sprintf("%s%d", fieldType, i+1),
+			// Type:       typ,
 			IsVariadic: isVar,
 		})
 	}
 	for _, idenTok := range tok.Names {
 		value = append(value, Value{
-			Name:       idenTok.Name,
-			Type:       typ,
+			Name: idenTok.Name,
+			// Type:       typ,
 			IsVariadic: isVar,
 		})
 	}

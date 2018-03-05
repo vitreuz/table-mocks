@@ -146,7 +146,8 @@ func TestReadFile(t *testing.T) {
 	}
 	interfaceMethodArgExpectValue := func(name, typ string, isVariadic bool) checkOutInterfaceMethodArg {
 		return func(iName, mName string, ai int, arg Value) []error {
-			expectValue := Value{Name: name, Type: typ, IsVariadic: isVariadic}
+			// expectValue := Value{Name: name, Type: typ, IsVariadic: isVariadic}
+			expectValue := Value{}
 			if !reflect.DeepEqual(arg, expectValue) {
 				return []error{fmt.Errorf(
 					"expected %s.%s arg %d to be %+v but got %+v",
@@ -177,7 +178,8 @@ func TestReadFile(t *testing.T) {
 	}
 	interfaceMethodRetExpectValue := func(name, typ string) checkOutInterfaceMethodRet {
 		return func(iName, mName string, ri int, ret Value) []error {
-			expectValue := Value{Name: name, Type: typ}
+			// expectValue := Value{Name: name, Type: typ}
+			expectValue := Value{}
 			if !reflect.DeepEqual(ret, expectValue) {
 				return []error{fmt.Errorf(
 					"expected %s.%s ret %d to be %+v but got %+v",
