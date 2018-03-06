@@ -32,6 +32,7 @@ type Method struct {
 // Value represents an arg or return value.
 type Value struct {
 	Name       string
+	Repeat     int
 	Type       ast.Expr
 	IsVariadic bool
 }
