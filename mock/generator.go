@@ -70,166 +70,215 @@ func (ifce Interface) GenerateMethods() []ast.Decl {
 	for _, method := range ifce.Methods {
 		// generate Returns
 		returns := method.generateReturns(ifce.Name)
-		decls = append(decls, returns)
+		// generate GetArgs
+		getArgs := method.generateGetArgs(ifce.Name)
+		// generate callback
+		callbck := method.generateCallback(ifce.Name)
+		// generate ForCall
+		forCall := method.generateForCall(ifce.Name)
+		decls = append(decls, returns, getArgs, callbck, forCall)
 	}
-	// generate GetArgs
-	// generate callback
-	// generate ForCall
 	return decls
 }
 
+func (ifce Interface) generateConstructor() *ast.FuncDecl {
+	fake := ast.NewIdent("fake")
+
+	body := blockStmt(
+		&ast.AssignStmt{
+			Lhs: expression(fake),
+			Tok: token.DEFINE,
+			Rhs: expression(compositeLit(strings.Title(ifce.Name), true)),
+		},
+	)
+	for _, method := range ifce.Methods {
+		field := method.fieldName()
+		methodStruct := method.structName(ifce.Name)
+
+		asgn := &ast.AssignStmt{
+			Lhs: expression(selectorExpr(fake, field)),
+			Tok: token.ASSIGN,
+			Rhs: expression(call(ast.NewIdent("make"), simpleMap("int", methodStruct))),
+		}
+		body.List = append(body.List, asgn)
+	}
+	body.List = append(body.List, &ast.ReturnStmt{Results: expression(fake)})
+
+	funcName := "New" + strings.Title(ifce.Name)
+	params := fieldList()
+	results := fieldList(field(starExpr(ifce.Name)))
+
+	return funcDecl(nil, funcName, params, results, body)
+}
+
 func (meth Method) generateReturns(ifceName string) *ast.FuncDecl {
+	// Define resued ast.Nodes
 	fakeMethod := ast.NewIdent("fakeMethod")
 	fakeMethodField := selectorExpr(ast.NewIdent("fake"), meth.fieldName())
 	fakeMethodMutex := selectorExpr(ast.NewIdent("fake"), meth.mutexName())
 
-	recv := &ast.FieldList{
-		List: []*ast.Field{{
-			Names: []*ast.Ident{ast.NewIdent("fake")},
-			Type:  &ast.StarExpr{X: ast.NewIdent(strings.Title(ifceName))},
-		}},
-	}
-	returnsName := strings.Title(meth.Name) + "Returns"
-	params := &ast.FieldList{List: []*ast.Field{}}
-	for _, ret := range meth.Rets {
-		params.List = append(params.List, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(ret.Name + "Result")},
-			Type:  ret.Type,
-		})
-	}
-
-	results := &ast.FieldList{List: []*ast.Field{{
-		Type: &ast.StarExpr{X: ast.NewIdent(ifceName)},
-	}}}
-	body := &ast.BlockStmt{List: []ast.Stmt{
+	params := fieldList()
+	body := blockStmt(
 		&ast.ExprStmt{
-			X: &ast.CallExpr{
-				Fun: selectorExpr(fakeMethodMutex, "Lock"),
-			},
-		}, &ast.AssignStmt{
-			Lhs: expression(fakeMethod),
-			Tok: token.DEFINE,
-			Rhs: expression(&ast.IndexExpr{
-				X:     fakeMethodField,
-				Index: &ast.BasicLit{Value: "0"},
-			}),
+			X: call(selectorExpr(fakeMethodMutex, "Lock")),
 		},
-	}}
+		&ast.AssignStmt{
+			Lhs: expression(fakeMethod),
+			Rhs: expression(valueIndex(fakeMethodField, "0")),
+			Tok: token.DEFINE,
+		},
+	)
 
 	for _, ret := range meth.Rets {
-		asgn := &ast.AssignStmt{
-			Lhs: expression(
-				selectorExpr(fakeMethod, ret.fieldName(true)),
-			),
-			Tok: token.ASSIGN,
-			Rhs: expression(ast.NewIdent(ret.Name + "Result")),
-		}
-
-		body.List = append(body.List, asgn)
+		params.List = append(params.List, field(ret.Type, ret.argName(true)))
+		body.List = append(body.List, ret.assignToField(fakeMethod, true))
 	}
 
 	body.List = append(body.List, []ast.Stmt{
 		&ast.AssignStmt{
-			Lhs: expression(&ast.IndexExpr{
-				X:     fakeMethodField,
-				Index: &ast.BasicLit{Value: "0"},
-			}),
+			Lhs: expression(valueIndex(fakeMethodField, "0")),
 			Tok: token.ASSIGN,
 			Rhs: expression(fakeMethod),
-		}, &ast.ExprStmt{
-			&ast.CallExpr{
-				Fun: selectorExpr(fakeMethodMutex, "Unlock"),
-			},
-		}, &ast.ReturnStmt{
+		},
+		&ast.ExprStmt{
+			X: call(selectorExpr(fakeMethodMutex, "Unlock")),
+		},
+		&ast.ReturnStmt{
 			Results: expression(ast.NewIdent("fake")),
 		},
 	}...)
 
-	return generateFuncDecl(recv, returnsName, params, results, body)
+	recv := field(starExpr(strings.Title(ifceName)), "fake")
+	name := strings.Title(meth.Name) + "Returns"
+	results := fieldList(field(starExpr(ifceName)))
+
+	return funcDecl(recv, name, params, results, body)
 }
 
-func (ifce Interface) generateConstructor() *ast.FuncDecl {
-	constructorName := "New" + strings.Title(ifce.Name)
-	params := &ast.FieldList{}
-	results := &ast.FieldList{
-		List: []*ast.Field{{
-			Type: &ast.StarExpr{X: ast.NewIdent(strings.Title(ifce.Name))},
-		}},
+func (val Value) assignToField(method ast.Expr, isResult bool) *ast.AssignStmt {
+	return &ast.AssignStmt{
+		Lhs: expression(selectorExpr(method, val.fieldName(isResult))),
+		Rhs: expression(ast.NewIdent(val.argName(isResult))),
+		Tok: token.ASSIGN,
 	}
-	body := &ast.BlockStmt{
-		List: []ast.Stmt{
-			&ast.AssignStmt{
-				Lhs: expression(ast.NewIdent("fake")),
-				Tok: token.DEFINE,
-				Rhs: expression(compositeLit(strings.Title(ifce.Name), true)),
+}
+
+func (val Value) assignToVar(method ast.Expr, isResult bool) *ast.AssignStmt {
+	return &ast.AssignStmt{
+		Lhs: expression(ast.NewIdent(val.argName(isResult))),
+		Rhs: expression(selectorExpr(method, val.fieldName(isResult))),
+		Tok: token.ASSIGN,
+	}
+}
+
+func (meth Method) generateGetArgs(ifceName string) *ast.FuncDecl {
+	fakeMethodField := selectorExpr(ast.NewIdent("fake"), meth.fieldName())
+	fakeMethodMutex := selectorExpr(ast.NewIdent("fake"), meth.mutexName())
+
+	body := blockStmt(&ast.ExprStmt{X: call(selectorExpr(fakeMethodMutex, "RLock"))})
+	results := fieldList()
+	returns := expression()
+
+	for _, arg := range meth.Args {
+		results.List = append(results.List, field(arg.Type, arg.argName(false)))
+		returns = append(returns, ast.NewIdent(arg.argName(false)))
+		body.List = append(body.List, arg.assignToVar(valueIndex(fakeMethodField, "0"), false))
+	}
+	body.List = append(body.List, []ast.Stmt{
+		&ast.ExprStmt{X: call(selectorExpr(fakeMethodMutex, "RUnlock"))},
+		&ast.ReturnStmt{Results: returns},
+	}...)
+
+	recv := field(starExpr(strings.Title(ifceName)), "fake")
+	funcName := strings.Title(meth.Name) + "GetArgs"
+	params := fieldList()
+
+	return funcDecl(recv, funcName, params, results, body)
+}
+
+func (meth Method) generateCallback(ifceName string) *ast.GenDecl {
+	fnIdent := ast.NewIdent(meth.structName(ifceName))
+
+	return &ast.GenDecl{
+		Tok: token.TYPE,
+		Specs: []ast.Spec{
+			&ast.TypeSpec{
+				Name: ast.NewIdent(meth.funcName(ifceName)),
+				Type: &ast.FuncType{
+					Params:  fieldList(field(fnIdent)),
+					Results: fieldList(field(fnIdent)),
+				},
 			},
 		},
 	}
+}
 
-	for _, method := range ifce.Methods {
-		stmt := &ast.AssignStmt{
-			Lhs: expression(
-				selectorExpr(ast.NewIdent("fake"), toMethodName(method.Name, "Method")),
-			),
-			Tok: token.ASSIGN,
-			Rhs: expression(
-				&ast.CallExpr{
-					Fun: ast.NewIdent("make"),
-					Args: expression(&ast.MapType{
-						Key:   ast.NewIdent("int"),
-						Value: ast.NewIdent(toMethodStructName(ifce.Name, method.Name)),
-					}),
-				},
-			),
-		}
-		body.List = append(body.List, stmt)
+func (meth Method) assignFromMap(index string, expr ast.Expr, define bool) *ast.AssignStmt {
+	fakeMethodField := selectorExpr(ast.NewIdent("fake"), meth.fieldName())
+	fakeMethodMap := valueIndex(fakeMethodField, index)
+	tok := token.ASSIGN
+	if define {
+		tok = token.DEFINE
 	}
 
-	body.List = append(body.List, &ast.ReturnStmt{
-		Results: expression(ast.NewIdent("fake"))},
+	return &ast.AssignStmt{
+		Lhs: expression(expr),
+		Rhs: expression(fakeMethodMap),
+		Tok: tok,
+	}
+}
+
+func (meth Method) assignToMap(index string, expr ast.Expr) *ast.AssignStmt {
+	fakeMethodField := selectorExpr(ast.NewIdent("fake"), meth.fieldName())
+	fakeMethodMap := valueIndex(fakeMethodField, index)
+
+	return &ast.AssignStmt{
+		Lhs: expression(fakeMethodMap),
+		Rhs: expression(expr),
+		Tok: token.ASSIGN,
+	}
+}
+
+func (meth Method) generateForCall(ifceName string) *ast.FuncDecl {
+	fakeMethod := ast.NewIdent("fakeMethod")
+	fakeMethodMutex := selectorExpr(ast.NewIdent("fake"), meth.mutexName())
+
+	body := blockStmt(
+		&ast.ExprStmt{X: call(selectorExpr(fakeMethodMutex, "Lock"))},
+		&ast.RangeStmt{
+			Key: ast.NewIdent("_"), Value: ast.NewIdent("fn"),
+			Tok: token.DEFINE,
+			X:   ast.NewIdent("fns"),
+			Body: blockStmt(
+				meth.assignFromMap("call", fakeMethod, true),
+				meth.assignToMap("call", call(ast.NewIdent("fn"), fakeMethod)),
+			),
+		},
+		&ast.ExprStmt{X: call(selectorExpr(fakeMethodMutex, "Unlock"))},
+		&ast.ReturnStmt{Results: expression(ast.NewIdent("fake"))},
 	)
+	recv := field(starExpr(strings.Title(ifceName)), "fake")
+	funcName := strings.Title(meth.Name) + "ForCall"
+	params := fieldList(
+		field(ast.NewIdent("int"), "call"),
+		field(&ast.Ellipsis{Elt: ast.NewIdent(meth.funcName(ifceName))}, "fns"),
+	)
+	results := fieldList(field(starExpr(ifceName)))
 
-	return generateFuncDecl(nil, constructorName, params, results, body)
-}
-
-func generateFuncDecl(recv *ast.FieldList, name string, params, results *ast.FieldList, body *ast.BlockStmt) *ast.FuncDecl {
-	return &ast.FuncDecl{
-		Recv: recv,
-		Name: ast.NewIdent(name),
-		Type: &ast.FuncType{Params: params, Results: results},
-		Body: body,
-	}
-}
-
-func expression(expr ...ast.Expr) []ast.Expr { return expr }
-func compositeLit(name string, deref bool) *ast.UnaryExpr {
-	expr := &ast.UnaryExpr{X: &ast.CompositeLit{Type: ast.NewIdent(name)}}
-	if deref {
-		expr.Op = token.AND
-	}
-	return expr
-}
-func selectorExpr(x ast.Expr, sel string) *ast.SelectorExpr {
-	return &ast.SelectorExpr{X: x, Sel: ast.NewIdent(sel)}
+	return funcDecl(recv, funcName, params, results, body)
 }
 
 func (ifce Interface) generateInterfaceStruct() ast.Decl {
 	fieldList := []*ast.Field{}
 	for _, method := range ifce.Methods {
-		methField := &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(toMethodName(method.Name, "Method"))},
-			Type: &ast.MapType{
-				Key:   ast.NewIdent("int"),
-				Value: ast.NewIdent(toMethodStructName(ifce.Name, method.Name)),
-			},
-		}
-		methMutex := &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(toMethodName(method.Name, "Mutex"))},
-			Type: &ast.SelectorExpr{
-				X:   ast.NewIdent("sync"),
-				Sel: ast.NewIdent("RWMutex"),
-			},
-		}
+		methField := field(
+			simpleMap("int", method.structName(ifce.Name)),
+			method.fieldName(),
+		)
+		methMutex := field(
+			selectorExpr(ast.NewIdent("sync"), "RWMutex"),
+			method.mutexName(),
+		)
 
 		fieldList = append(fieldList, methField, methMutex)
 	}
@@ -239,30 +288,25 @@ func (ifce Interface) generateInterfaceStruct() ast.Decl {
 
 func (meth Method) generateMethodStruct(ifceName string) ast.Decl {
 	fieldList := []*ast.Field{}
-	for i, arg := range meth.Args {
-		fieldList = append(fieldList, arg.generateValue(i, false))
+	for _, arg := range meth.Args {
+		fieldList = append(fieldList, arg.field(false))
 	}
-
-	fieldList = append(fieldList, &ast.Field{
-		Names: []*ast.Ident{ast.NewIdent("Called")},
-		Type:  ast.NewIdent("bool"),
-	})
-
-	for i, res := range meth.Rets {
-		fieldList = append(fieldList, res.generateValue(i, true))
+	fieldList = append(fieldList, field(ast.NewIdent("bool"), "Called"))
+	for _, res := range meth.Rets {
+		fieldList = append(fieldList, res.field(true))
 	}
 
 	return generateStruct(toMethodStructName(ifceName, meth.Name), fieldList)
 }
 
-func (value Value) generateValue(i int, isResult bool) *ast.Field {
+func (value Value) field(isResult bool) *ast.Field {
 	suffix := "Arg"
 	if isResult {
 		suffix = "Result"
 	}
 	name := strings.Title(value.Name) + suffix
-	if value.Name == "" {
-		panic("no name")
+	if value.Repeat != 0 {
+		name += strconv.Itoa(value.Repeat)
 	}
 
 	return &ast.Field{
@@ -300,6 +344,14 @@ func (method Method) fieldName() string {
 }
 func (method Method) mutexName() string {
 	return toMethodName(method.Name, "Mutex")
+}
+
+func (method Method) structName(ifceName string) string {
+	return strings.Title(ifceName) + strings.Title(method.Name) + "Method"
+}
+
+func (method Method) funcName(ifceName string) string {
+	return strings.Title(ifceName) + strings.Title(method.Name) + "Func"
 }
 
 func toMethodName(name, suffix string) string {

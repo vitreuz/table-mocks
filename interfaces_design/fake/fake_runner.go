@@ -8,6 +8,7 @@ import (
 type Runner struct {
 	runMethod map[int]RunnerRunMethod
 	runMutex  sync.RWMutex
+	runCalls  int
 }
 
 type RunnerRunMethod struct {
@@ -18,15 +19,24 @@ type RunnerRunMethod struct {
 	ErrResult  error
 }
 
-func (method RunnerRunMethod) WasCalled() bool { return method.Called }
-
-type RunnerRunFunc func(RunnerRunMethod) RunnerRunMethod
-
 func NewRunner() *Runner {
 	fake := &Runner{}
 	fake.runMethod = make(map[int]RunnerRunMethod)
 
 	return fake
+}
+
+func (fake *Runner) Run(distanceArg int) (timeResult time.Duration, errResult error) {
+	fake.runMutex.Lock()
+	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod.DistanceArg = distanceArg
+	timeResult = fakeMethod.TimeResult
+	errResult = fakeMethod.ErrResult
+	fake.runMethod[fake.runCalls] = fakeMethod
+	fake.runCalls++
+	fake.runMutex.Lock()
+
+	return
 }
 
 func (fake *Runner) RunReturns(timeResult time.Duration, errResult error) *Runner {
@@ -47,6 +57,8 @@ func (fake *Runner) RunGetArgs() (distanceArg int) {
 
 	return distanceArg
 }
+
+type RunnerRunFunc func(RunnerRunMethod) RunnerRunMethod
 
 func (fake *Runner) RunForCall(call int, fns ...RunnerRunFunc) *Runner {
 	fake.runMutex.Lock()

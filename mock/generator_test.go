@@ -324,11 +324,23 @@ func (fake *Runner) RunReturns(durationResult time.Duration, errResult error) *R
 	fake.runMutex.Unlock()
 	return fake
 }
-fake (fake *Runner) RunGetArgs() (distanceArg int) {
+func (fake *Runner) RunGetArgs() (distanceArg int) {
 	fake.runMutex.RLock()
 	distanceArg = fake.runMethod[0].DistanceArg
 	fake.runMutex.RUnlock()
 	return distanceArg
+}
+
+type RunnerRunFunc func(RunnerRunMethod) RunnerRunMethod
+
+func (fake *Runner) RunForCall(call int, fns ...RunnerRunFunc) *Runner {
+	fake.runMutex.Lock()
+	for _, fn := range fns {
+		fakeMethod := fake.runMethod[call]
+		fake.runMethod[call] = fn(fakeMethod)
+	}
+	fake.runMutex.Unlock()
+	return fake
 }`,
 				)),
 			),
