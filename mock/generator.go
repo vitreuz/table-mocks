@@ -68,6 +68,8 @@ func (ifce Interface) GenerateMethods() []ast.Decl {
 	// generate Constructor
 	decls := []ast.Decl{ifce.generateConstructor()}
 	for _, method := range ifce.Methods {
+		// generate interfaceMethod
+		ifceMethod := method.generateInterfaceMethod(ifce.Name)
 		// generate Returns
 		returns := method.generateReturns(ifce.Name)
 		// generate GetArgs
@@ -76,9 +78,62 @@ func (ifce Interface) GenerateMethods() []ast.Decl {
 		callbck := method.generateCallback(ifce.Name)
 		// generate ForCall
 		forCall := method.generateForCall(ifce.Name)
-		decls = append(decls, returns, getArgs, callbck, forCall)
+		decls = append(decls, ifceMethod, returns, getArgs, callbck, forCall)
 	}
 	return decls
+}
+
+func (meth Method) generateInterfaceMethod(ifceName string) *ast.FuncDecl {
+	fake := ast.NewIdent("fake")
+	fakeMethod := ast.NewIdent("fakeMethod")
+	fakeMethodField := selectorExpr(fake, meth.fieldName())
+	fakeMethodMutex := selectorExpr(fake, meth.mutexName())
+	fakeMethodCalls := selectorExpr(fake, meth.callsName())
+
+	body := blockStmt(
+		&ast.ExprStmt{
+			X: call(selectorExpr(fakeMethodMutex, "Lock")),
+		},
+		&ast.AssignStmt{
+			Lhs: expression(fakeMethod),
+			Rhs: expression(&ast.IndexExpr{X: fakeMethodField, Index: fakeMethodCalls}),
+			Tok: token.DEFINE,
+		},
+	)
+
+	params := fieldList()
+	for _, arg := range meth.Args {
+		params.List = append(params.List, arg.variable(false))
+		body.List = append(body.List, arg.assignToField(fakeMethod, false))
+	}
+
+	body.List = append(body.List, []ast.Stmt{
+		&ast.AssignStmt{
+			Lhs: expression(&ast.IndexExpr{X: fakeMethodField, Index: fakeMethodCalls}),
+			Rhs: expression(fakeMethod),
+			Tok: token.ASSIGN,
+		},
+		&ast.IncDecStmt{
+			X:   fakeMethodCalls,
+			Tok: token.INC,
+		},
+		&ast.ExprStmt{
+			X: call(selectorExpr(fakeMethodMutex, "Unlock")),
+		},
+	}...)
+
+	results := fieldList()
+	returns := &ast.ReturnStmt{}
+	for _, ret := range meth.Rets {
+		results.List = append(results.List, ret.variable(true))
+		returns.Results = append(returns.Results, selectorExpr(fakeMethod, ret.fieldName(true)))
+	}
+
+	body.List = append(body.List, returns)
+	recv := field(starExpr(strings.Title(ifceName)), "fake")
+	funcName := meth.Name
+
+	return funcDecl(recv, funcName, params, results, body)
 }
 
 func (ifce Interface) generateConstructor() *ast.FuncDecl {
@@ -315,6 +370,22 @@ func (value Value) field(isResult bool) *ast.Field {
 	}
 }
 
+func (value Value) variable(isResult bool) *ast.Field {
+	suffix := "Arg"
+	if isResult {
+		suffix = "Result"
+	}
+	name := value.Name + suffix
+	if value.Repeat != 0 {
+		name += strconv.Itoa(value.Repeat)
+	}
+
+	return &ast.Field{
+		Names: []*ast.Ident{ast.NewIdent(name)},
+		Type:  value.Type,
+	}
+}
+
 func (value Value) fieldName(isResult bool) string {
 	suffix := "Arg"
 	if isResult {
@@ -344,6 +415,9 @@ func (method Method) fieldName() string {
 }
 func (method Method) mutexName() string {
 	return toMethodName(method.Name, "Mutex")
+}
+func (method Method) callsName() string {
+	return toMethodName(method.Name, "Calls")
 }
 
 func (method Method) structName(ifceName string) string {

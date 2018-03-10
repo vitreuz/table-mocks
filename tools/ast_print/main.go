@@ -11,6 +11,7 @@ import (
 )
 
 var path = pflag.StringP("path", "p", "", "path to a file to print")
+var filter = pflag.StringP("filter", "f", "", "optional string value to filter by")
 
 func main() {
 	pflag.Parse()
@@ -30,5 +31,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	if *filter != "" {
+		filterFn := func(node string) bool { return *filter == node }
+		ast.FilterFile(f, filterFn)
+	}
+
 	ast.Print(token.NewFileSet(), f)
 }

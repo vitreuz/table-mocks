@@ -30,13 +30,11 @@ func (fake *Runner) Run(distanceArg int) (timeResult time.Duration, errResult er
 	fake.runMutex.Lock()
 	fakeMethod := fake.runMethod[fake.runCalls]
 	fakeMethod.DistanceArg = distanceArg
-	timeResult = fakeMethod.TimeResult
-	errResult = fakeMethod.ErrResult
 	fake.runMethod[fake.runCalls] = fakeMethod
 	fake.runCalls++
-	fake.runMutex.Lock()
+	fake.runMutex.Unlock()
 
-	return
+	return fakeMethod.TimeResult, fakeMethod.ErrResult
 }
 
 func (fake *Runner) RunReturns(timeResult time.Duration, errResult error) *Runner {

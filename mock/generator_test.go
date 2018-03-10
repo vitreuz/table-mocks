@@ -315,6 +315,15 @@ func TestGenerateMethods(t *testing.T) {
 	fake.runMethod = make(map[int]RunnerRunMethod)
 	return fake
 }
+func (fake *Runner) Run(distanceArg int) (durationResult time.Duration, errResult error) {
+	fake.runMutex.Lock()
+	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod.DistanceArg = distanceArg
+	fake.runMethod[fake.runCalls] = fakeMethod
+	fake.runCalls++
+	fake.runMutex.Unlock()
+	return fakeMethod.DurationResult, fakeMethod.ErrResult
+}
 func (fake *Runner) RunReturns(durationResult time.Duration, errResult error) *Runner {
 	fake.runMutex.Lock()
 	fakeMethod := fake.runMethod[0]
