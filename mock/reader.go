@@ -11,13 +11,13 @@ import (
 // Mock holds an array of all of the interfaces within a file.
 type Mock struct {
 	Package    string
-	Imports    []string
 	Interfaces []Interface
 }
 
 // Interface represents a single instance of an interface.
 type Interface struct {
 	Name    string
+	Imports []string
 	Methods []Method
 }
 

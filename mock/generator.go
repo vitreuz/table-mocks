@@ -12,33 +12,32 @@ import (
 	"unicode/utf8"
 )
 
-func GenerateFile(m *Mock, file *os.File) error {
-	m.addSyncImport()
+func GenerateFile(ifce *Interface, pkg string, file *os.File) error {
+	ifce.addSyncImport()
 
-	node := m.ToFile()
+	node := ifce.ToFile(pkg)
 	fset = token.NewFileSet()
 	return format.Node(file, fset, node)
 }
 
-func (m *Mock) addSyncImport() {
+func (m *Interface) addSyncImport() {
 	m.Imports = append(m.Imports, "sync")
 }
 
-func (m Mock) ToFile() *ast.File {
-	node := &ast.File{Name: ast.NewIdent(m.Package)}
+func (ifce Interface) ToFile(pkg string) *ast.File {
+	node := &ast.File{Name: ast.NewIdent("fake")}
 
-	if len(m.Imports) > 1 {
-		node.Decls = m.toImports()
+	if len(ifce.Imports) > 1 {
+		node.Decls = ifce.toImports()
 	}
 
-	for _, ifce := range m.Interfaces {
-		node.Decls = append(node.Decls, ifce.GenerateStructs()...)
-	}
+	node.Decls = append(node.Decls, ifce.GenerateStructs()...)
+	node.Decls = append(node.Decls, ifce.GenerateMethods()...)
 
 	return node
 }
 
-func (m Mock) toImports() []ast.Decl {
+func (m Interface) toImports() []ast.Decl {
 	node := &ast.GenDecl{
 		Lparen: 2,
 		Tok:    token.IMPORT,
