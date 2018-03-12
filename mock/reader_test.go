@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,7 +15,34 @@ import (
 	. "github.com/vitreuz/table-mocks/mock"
 )
 
-func TestReadFile(t *testing.T) {
+func TestReadPkg(t *testing.T) {
+	type pkgMaker func(dir string, i int)
+	pkg := func(ss ...pkgMaker) string {
+		dir, err := ioutil.TempDir("", "read_file_dir_")
+		if err != nil {
+			panic(err)
+		}
+
+		for si, s := range ss {
+			s(dir, si)
+		}
+
+		return dir
+	}
+	file := func(s string) pkgMaker {
+		return func(dir string, i int) {
+			p := filepath.Join(dir, fmt.Sprintf("tmp%d.go", i))
+			f, err := os.Create(p)
+			if err != nil {
+				panic(err)
+			}
+
+			r := strings.NewReader(s)
+			io.Copy(f, r)
+			f.Close()
+		}
+	}
+
 	type checkOut func(*Mock) []error
 	check := func(fns ...checkOut) []checkOut { return fns }
 	expectInterfaceCount := func(count int) checkOut {
@@ -207,18 +238,18 @@ func TestReadFile(t *testing.T) {
 	// ----------       ----------
 	tests := [...]struct {
 		name   string
-		input  *strings.Reader
+		input  string
 		checks []checkOut
 	}{
 		{
 			"Simplest interface",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface{
 					C(d string) (e string)
 				}`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -239,13 +270,13 @@ func TestReadFile(t *testing.T) {
 			),
 		}, {
 			"Unnamed args",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface {
 					C(string, int, string) (int, error)
 				}`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -269,13 +300,13 @@ func TestReadFile(t *testing.T) {
 			),
 		}, {
 			"Minimal identifier",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface {
 					C(d, e string) (f int, g error)
 				}`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -298,7 +329,7 @@ func TestReadFile(t *testing.T) {
 			),
 		}, {
 			"Embedded interface same file",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface{
@@ -310,7 +341,7 @@ func TestReadFile(t *testing.T) {
 					B
 					F(int) string
 				}`,
-			),
+			)),
 			check(
 				expectInterfaceCount(2),
 				checkInterface(1,
@@ -348,38 +379,81 @@ func TestReadFile(t *testing.T) {
 			// },
 			// // NOTE: embedded interfaces in different files not supported right now
 		}, {
-			"Embedded interface different file",
-			strings.NewReader(`
+			"Embedded interface different file (same package)",
+			pkg(file(`
 		     package a
 
-				import "io"
+			type B interface {
+				D
+				C() string
+			}`,
+			), file(`
+			package a
 
-				type B interface {
-					io.Reader
-					C() string
-				}`,
-			),
+			type D interface{
+				E()
+				F()
+			}`,
+			)),
 			check(
-				expectInterfaceCount(1),
+				expectInterfaceCount(2),
 				checkInterface(0,
 					interfaceHasName("B"),
-					interfaceHasMethodCount(2),
+					interfaceHasMethodCount(3),
 					checkMethod(0,
-						methodHasName("Read"),
-						methodHasArgCount(1),
+						methodHasName("E"),
+						methodHasArgCount(0),
+					),
+					checkMethod(1,
+						methodHasName("F"),
+						methodHasArgCount(0),
+					),
+					checkMethod(2,
+						methodHasName("C"),
+						methodHasArgCount(0),
 					),
 				),
 			),
-		},
-		{
+		}, {
+			"Embedded interface different file (different package)",
+			pkg(file(`
+			 package a
+
+			 import "io"
+
+			type B interface {
+				io.Reader
+				C() string
+			}`,
+			)),
+			check(
+				expectInterfaceCount(2),
+				checkInterface(0,
+					interfaceHasName("B"),
+					interfaceHasMethodCount(3),
+					checkMethod(0,
+						methodHasName("E"),
+						methodHasArgCount(0),
+					),
+					checkMethod(1,
+						methodHasName("D"),
+						methodHasArgCount(0),
+					),
+					checkMethod(2,
+						methodHasName("C"),
+						methodHasArgCount(0),
+					),
+				),
+			),
+		}, {
 			"Variadic args",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface {
 					C(...string)
 				}`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -396,13 +470,13 @@ func TestReadFile(t *testing.T) {
 			),
 		}, {
 			"No returns method",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface{
 					C()
 				}`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -417,14 +491,14 @@ func TestReadFile(t *testing.T) {
 			),
 		}, {
 			"Type value declared from other file",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface{
 					C(bytes.Buffer)
 				}
 				`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -442,14 +516,14 @@ func TestReadFile(t *testing.T) {
 			),
 		}, {
 			"Array values",
-			strings.NewReader(`
+			pkg(file(`
 				package a
 
 				type B interface{
 					C([][]string, []bytes.Buffer) []error
 				}
 				`,
-			),
+			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
@@ -474,7 +548,10 @@ func TestReadFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mocks := ReadFile(tt.input)
+			dir := tt.input
+			defer os.RemoveAll(dir)
+
+			mocks := ReadPkg(dir)
 			for _, check := range tt.checks {
 				for _, checkErr := range check(mocks) {
 					if checkErr != nil {

@@ -6,7 +6,11 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"os"
+	"sort"
 	"strings"
+
+	"gopkg.in/Sirupsen/logrus.v0"
 )
 
 // Mock holds an array of all of the interfaces within a file.
@@ -40,6 +44,61 @@ var fset *token.FileSet
 
 type fileReader struct{}
 
+func ReadPkg(dir string) *Mock {
+	logrus.WithField("dir", dir).Println("reading dir")
+
+	fset = token.NewFileSet()
+	noTests := func(f os.FileInfo) bool { return !strings.Contains(f.Name(), "_test") }
+	pkgs, err := parser.ParseDir(fset, dir, noTests, parser.AllErrors)
+	if err != nil {
+		panic(err)
+	}
+
+	// Don't know what this would mean. Should only have one package per read.
+	if len(pkgs) > 1 {
+		panic("too many packages")
+	}
+
+	mock := new(Mock)
+	for pkgName, pkg := range pkgs {
+		logrus.WithFields(logrus.Fields{
+			"pkg_name":   pkgName,
+			"file_count": len(pkg.Files),
+		}).Println("parsing package")
+
+		pkg.Scope = ast.NewScope(nil)
+
+		// ast.Print(fset, pkg.Scope)
+
+		var files []string
+		for fname, node := range pkg.Files {
+			files = append(files, fname)
+
+			for identity, obj := range node.Scope.Objects {
+				pkg.Scope.Objects[identity] = obj
+			}
+		}
+		sort.Strings(files)
+
+		for _, fname := range files {
+			logrus.WithField("file_name", fname).Println("parings file")
+
+			node := pkg.Files[fname]
+
+			// TODO: find a way to pass the scope to fix embedded interfaces
+			for _, d := range genDecls(node) {
+				specToks := interfaceSpecTokens(d)
+
+				for _, specTok := range specToks {
+					mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok, pkg.Scope))
+				}
+			}
+		}
+	}
+
+	return mock
+}
+
 // ReadFile is the primary parser for a file to get mocked. This method walks
 // along the file ast to create a Mock object. Interfaces with embedded fields
 // outside of this file is not currently supported.
@@ -58,7 +117,7 @@ func ReadFile(reader io.Reader) *Mock {
 		specToks := interfaceSpecTokens(d)
 
 		for _, specTok := range specToks {
-			mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok))
+			mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok, nil))
 		}
 	}
 
@@ -93,13 +152,13 @@ func interfaceSpecTokens(node *ast.GenDecl) []*ast.TypeSpec {
 	return toks
 }
 
-func parseInterfaceToken(tok *ast.TypeSpec) Interface {
+func parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scope) Interface {
 	itfcTok := tok.Type.(*ast.InterfaceType)
 	methods := []Method{}
 
 	for _, methTok := range itfcTok.Methods.List {
-		if specType, ok := embeddedInterface(methTok); ok {
-			embedded := parseInterfaceToken(specType)
+		if specType, ok := embeddedInterface(methTok, scope); ok {
+			embedded := parseInterfaceToken(specType, scope)
 			methods = append(methods, embedded.Methods...)
 			continue
 		}
@@ -112,14 +171,19 @@ func parseInterfaceToken(tok *ast.TypeSpec) Interface {
 // embeddedInterface returns any embedded interfaces or false otherwise. An
 // embedded interface can be determined by checking the Names attribute. Methods
 // have a Names tokens, whereas embedded interfaces do not.
-func embeddedInterface(tok *ast.Field) (*ast.TypeSpec, bool) {
+func embeddedInterface(tok *ast.Field, scope *ast.Scope) (*ast.TypeSpec, bool) {
 	if len(tok.Names) > 0 {
 		return nil, false
 	}
 
 	switch tokType := tok.Type.(type) {
 	case *ast.Ident:
-		if specTok, ok := tokType.Obj.Decl.(*ast.TypeSpec); ok {
+		obj := tokType.Obj
+		if tokType.Obj == nil {
+			obj = scope.Objects[tokType.Name]
+		}
+
+		if specTok, ok := obj.Decl.(*ast.TypeSpec); ok {
 			_, ok := specTok.Type.(*ast.InterfaceType)
 			return specTok, ok
 		}
