@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"strings"
 )
 
 // Mock holds an array of all of the interfaces within a file.
@@ -31,13 +32,13 @@ type Method struct {
 
 // Value represents an arg or return value.
 type Value struct {
-	Name       string
-	Repeat     int
-	Type       ast.Expr
-	IsVariadic bool
+	Name string
+	Type ast.Expr
 }
 
 var fset *token.FileSet
+
+type fileReader struct{}
 
 // ReadFile is the primary parser for a file to get mocked. This method walks
 // along the file ast to create a Mock object. Interfaces with embedded fields
@@ -50,7 +51,8 @@ func ReadFile(reader io.Reader) *Mock {
 	}
 
 	mock := new(Mock)
-	ast.Print(fset, node)
+
+	// ast.Print(fset, node)
 
 	for _, d := range genDecls(node) {
 		specToks := interfaceSpecTokens(d)
@@ -145,59 +147,97 @@ func parseMethodToken(tok *ast.Field) Method {
 }
 
 func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
+
+	unnameArgs := make(map[string]repeat)
 	args := []Value{}
-	for ai, arg := range tok.Params.List {
-		args = append(args, parseFieldToken(arg, "arg", ai)...)
+	for ai, argTok := range tok.Params.List {
+		args = append(args, parseFieldToken(argTok, "Arg", unnameArgs, ai)...)
 	}
 
 	if tok.Results == nil {
 		return args, nil
 	}
-	rets := []Value{}
+	var rets []Value
+	unnamedRets := make(map[string]repeat)
 	for ri, ret := range tok.Results.List {
-		rets = append(rets, parseFieldToken(ret, "ret", ri)...)
+		rets = append(rets, parseFieldToken(ret, "Result", unnamedRets, ri)...)
 	}
 
+	for _, arg := range unnameArgs {
+		if arg.repeats {
+			args[arg.first].Name += "1"
+		}
+	}
+	for _, ret := range unnamedRets {
+		if ret.repeats {
+			rets[ret.first].Name += "1"
+		}
+	}
 	return args, rets
 }
 
-func parseFieldToken(tok *ast.Field, fieldType string, i int) []Value {
+type repeat struct {
+	repeats bool
+	count   int
+	first   int
+}
+
+func parseFieldToken(tok *ast.Field, fieldType string, unnamed map[string]repeat, i int) []Value {
 	value := []Value{}
 
-	_, isVar := parseType(tok.Type)
+	valName, valType := parseType(tok.Type)
 
 	if len(tok.Names) == 0 {
+		repeat, ok := unnamed[valName]
+		if !ok {
+			repeat.first = i
+			repeat.count++
+			unnamed[valName] = repeat
+			return append(value, Value{
+				Name: fmt.Sprintf("%s%s", valName, fieldType),
+				Type: valType,
+			})
+		}
+		repeat.repeats = true
+		repeat.count++
+		unnamed[valName] = repeat
+
 		return append(value, Value{
-			Name: fmt.Sprintf("%s%d", fieldType, i+1),
-			// Type:       typ,
-			IsVariadic: isVar,
+			Name: fmt.Sprintf("%s%s%d", valName, fieldType, repeat.count),
+			Type: valType,
 		})
 	}
 	for _, idenTok := range tok.Names {
 		value = append(value, Value{
 			Name: idenTok.Name,
-			// Type:       typ,
-			IsVariadic: isVar,
+			Type: valType,
 		})
 	}
 
 	return value
 }
 
-func parseType(tok ast.Expr) (string, bool) {
+func parseType(tok ast.Expr) (string, ast.Expr) {
 	switch typeTok := tok.(type) {
 	case *ast.Ident:
-		return typeTok.Name, false
+		name := typeTok.Name
+		if name == "error" {
+			name = "err"
+		}
+		return name, ast.NewIdent(typeTok.Name)
 	case *ast.Ellipsis:
-		typ, _ := parseType(typeTok.Elt)
-		return typ, true
+		name, expr := parseType(typeTok.Elt)
+		return name + "Var", &ast.Ellipsis{Elt: expr}
 	case *ast.SelectorExpr:
-		pack, _ := parseType(typeTok.X)
-		return fmt.Sprintf("%s.%s", pack, typeTok.Sel.Name), false
+		_, expr := parseType(typeTok.X)
+		return lowerFirst(typeTok.Sel.Name), &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(typeTok.Sel.Name)}
 	case *ast.ArrayType:
-		typ, _ := parseType(typeTok.Elt)
-		return fmt.Sprintf("[]%s", typ), false
+		name, expr := parseType(typeTok.Elt)
+		if !strings.HasSuffix(name, "Arr") {
+			name += "Arr"
+		}
+		return name, &ast.ArrayType{Elt: expr}
 	}
 
-	return "", false
+	return "", nil
 }

@@ -173,19 +173,19 @@ func TestGenerateStructs(t *testing.T) {
 						Name: "Run",
 						Args: []Value{
 							{
-								Name: "distance",
+								Name: "distanceArg",
 								Type: &ast.Ident{Name: "int"},
 							},
 						},
 						Rets: []Value{
 							{
-								Name: "duration",
+								Name: "durationResult",
 								Type: &ast.SelectorExpr{
 									X:   &ast.Ident{Name: "time"},
 									Sel: &ast.Ident{Name: "Duration"},
 								},
 							}, {
-								Name: "err",
+								Name: "errResult",
 								Type: &ast.Ident{Name: "error"},
 							},
 						},
@@ -285,19 +285,19 @@ func TestGenerateMethods(t *testing.T) {
 						Name: "Run",
 						Args: []Value{
 							{
-								Name: "distance",
+								Name: "distanceArg",
 								Type: &ast.Ident{Name: "int"},
 							},
 						},
 						Rets: []Value{
 							{
-								Name: "duration",
+								Name: "durationResult",
 								Type: &ast.SelectorExpr{
 									X:   &ast.Ident{Name: "time"},
 									Sel: &ast.Ident{Name: "Duration"},
 								},
 							}, {
-								Name: "err",
+								Name: "errResult",
 								Type: &ast.Ident{Name: "error"},
 							},
 						},

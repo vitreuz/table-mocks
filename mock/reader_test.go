@@ -3,6 +3,8 @@ package mock_test
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,9 +12,8 @@ import (
 )
 
 func TestReadFile(t *testing.T) {
-
 	type checkOut func(*Mock) []error
-	checks := func(fns ...checkOut) []checkOut { return fns }
+	check := func(fns ...checkOut) []checkOut { return fns }
 	expectInterfaceCount := func(count int) checkOut {
 		return func(mocks *Mock) []error {
 			if len(mocks.Interfaces) != count {
@@ -25,7 +26,7 @@ func TestReadFile(t *testing.T) {
 		}
 	}
 	type checkOutInterface func(Interface) []error
-	checksInterface := func(i int, fns ...checkOutInterface) checkOut {
+	checkInterface := func(i int, fns ...checkOutInterface) checkOut {
 		return func(m *Mock) []error {
 			if len(m.Interfaces) < i+1 {
 				return []error{errors.New(
@@ -49,7 +50,7 @@ func TestReadFile(t *testing.T) {
 		return func(iface Interface) []error {
 			if iface.Name != name {
 				return []error{fmt.Errorf(
-					"expected have name %q but got %q",
+					"expected to have name %q but got %q",
 					name, iface.Name,
 				)}
 			}
@@ -68,8 +69,8 @@ func TestReadFile(t *testing.T) {
 		}
 	}
 
-	type checkOutInterfaceMethod func(Method) []error
-	checkMethod := func(i int, fns ...checkOutInterfaceMethod) checkOutInterface {
+	type checkOutMethod func(Method) []error
+	checkMethod := func(i int, fns ...checkOutMethod) checkOutInterface {
 		return func(ifce Interface) []error {
 			if len(ifce.Methods) < i+1 {
 				return []error{errors.New(
@@ -93,7 +94,7 @@ func TestReadFile(t *testing.T) {
 		}
 	}
 
-	methodHasName := func(name string) checkOutInterfaceMethod {
+	methodHasName := func(name string) checkOutMethod {
 		return func(method Method) []error {
 			if method.Name != name {
 				return []error{fmt.Errorf(
@@ -104,7 +105,7 @@ func TestReadFile(t *testing.T) {
 			return nil
 		}
 	}
-	methodHasArgCount := func(count int) checkOutInterfaceMethod {
+	methodHasArgCount := func(count int) checkOutMethod {
 		return func(method Method) []error {
 			if len(method.Args) != count {
 				return []error{fmt.Errorf(
@@ -115,7 +116,7 @@ func TestReadFile(t *testing.T) {
 			return nil
 		}
 	}
-	methodHasRetCount := func(count int) checkOutInterfaceMethod {
+	methodHasRetCount := func(count int) checkOutMethod {
 		return func(method Method) []error {
 			if len(method.Rets) != count {
 				return []error{fmt.Errorf(
@@ -127,75 +128,83 @@ func TestReadFile(t *testing.T) {
 		}
 	}
 
-	type checkOutInterfaceMethodArg func(Value) []error
-	// checkInterfaceMethodArg := func(ii, mi, ai int, fns ...checkOutInterfaceMethodArg) []checkOut {
-	// 	checks := []checkOut{}
+	type checkOutValue func(Value) []error
+	checkArgs := func(fns ...checkOutValue) checkOutMethod {
+		return func(method Method) []error {
+			var errs []error
+			for i := 0; i < len(fns); i++ {
+				if i >= len(method.Args) {
+					return append(errs, fmt.Errorf(
+						"unable to check arg %d",
+						i,
+					))
+				}
 
-	// 	for fi := 0; fi < len(fns); fi++ {
-	// 		fn := fns[fi]
-	// 		checks = append(checks, func(mock *Mock) []error {
-	// 			return fn(
-	// 				mock.Interfaces[ii].Name,
-	// 				mock.Interfaces[ii].Methods[mi].Name,
-	// 				ai,
-	// 				mock.Interfaces[ii].Methods[mi].Args[ai],
-	// 			)
-	// 		})
-	// 	}
+				fn := fns[i]
+				for _, err := range fn(method.Args[i]) {
+					errs = append(errs, fmt.Errorf(
+						"Arg %d: %v",
+						i, err,
+					))
+				}
+			}
+			return errs
+		}
+	}
+	checkRets := func(fns ...checkOutValue) checkOutMethod {
+		return func(method Method) []error {
+			var errs []error
+			for i := 0; i < len(fns); i++ {
+				if i >= len(method.Rets) {
+					return append(errs, fmt.Errorf(
+						"unable to check arg %d",
+						i,
+					))
+				}
 
-	// 	return checks
-	// }
-	// interfaceMethodArgExpectValue := func(name, typ string, isVariadic bool) checkOutInterfaceMethodArg {
-	// 	return func(iName, mName string, ai int, arg Value) []error {
-	// 		// expectValue := Value{Name: name, Type: typ, IsVariadic: isVariadic}
-	// 		expectValue := Value{}
-	// 		if !reflect.DeepEqual(arg, expectValue) {
-	// 			return []error{fmt.Errorf(
-	// 				"expected %s.%s arg %d to be %+v but got %+v",
-	// 				iName, mName, ai, expectValue, arg,
-	// 			)}
-	// 		}
-	// 		return nil
-	// 	}
-	// }
-
-	// type checkOutInterfaceMethodRet func(string, string, int, Value) []error
-	// checkInterfaceMethodRet := func(ii, mi, ri int, fns ...checkOutInterfaceMethodRet) []checkOut {
-	// 	checks := []checkOut{}
-
-	// 	for fi := 0; fi < len(fns); fi++ {
-	// 		fn := fns[fi]
-	// 		checks = append(checks, func(mock *Mock) []error {
-	// 			return fn(
-	// 				mock.Interfaces[ii].Name,
-	// 				mock.Interfaces[ii].Methods[mi].Name,
-	// 				ri,
-	// 				mock.Interfaces[ii].Methods[mi].Rets[ri],
-	// 			)
-	// 		})
-	// 	}
-
-	// 	return checks
-	// }
-	// interfaceMethodRetExpectValue := func(name, typ string) checkOutInterfaceMethodRet {
-	// 	return func(iName, mName string, ri int, ret Value) []error {
-	// 		// expectValue := Value{Name: name, Type: typ}
-	// 		expectValue := Value{}
-	// 		if !reflect.DeepEqual(ret, expectValue) {
-	// 			return []error{fmt.Errorf(
-	// 				"expected %s.%s ret %d to be %+v but got %+v",
-	// 				iName, mName, ri, expectValue, ret,
-	// 			)}
-	// 		}
-	// 		return nil
-	// 	}
-	// }
+				fn := fns[i]
+				for _, err := range fn(method.Rets[i]) {
+					errs = append(errs, fmt.Errorf(
+						"Arg %d: %v",
+						i, err,
+					))
+				}
+			}
+			return errs
+		}
+	}
+	checkValue := func(name string, typ ast.Expr) checkOutValue {
+		return func(actual Value) []error {
+			var errs []error
+			if actual.Name != name {
+				errs = append(errs, fmt.Errorf(
+					"expected to have name %s but got %s",
+					name, actual.Name,
+				))
+			}
+			if !reflect.DeepEqual(typ, actual.Type) {
+				errs = append(errs, fmt.Errorf(
+					"expected to have type %T %+v but got %T %+v",
+					typ, typ, actual.Type, actual.Type,
+				))
+			}
+			return errs
+		}
+	}
+	stringType := ast.NewIdent("string")
+	intType := ast.NewIdent("int")
+	errorType := ast.NewIdent("error")
+	arrayType := func(expr ast.Expr) *ast.ArrayType { return &ast.ArrayType{Elt: expr} }
+	ellipseType := func(expr ast.Expr) *ast.Ellipsis { return &ast.Ellipsis{Elt: expr} }
+	selectorType := func(x ast.Expr, sel string) *ast.SelectorExpr {
+		return &ast.SelectorExpr{X: x, Sel: ast.NewIdent(sel)}
+	}
+	bytesSelector := selectorType(ast.NewIdent("bytes"), "Buffer")
 	// ----------       ----------
 	// ----------       ----------
 	// ---------- Tests ----------
 	// ----------       ----------
 	// ----------       ----------
-
 	tests := [...]struct {
 		name   string
 		input  *strings.Reader
@@ -210,82 +219,54 @@ func TestReadFile(t *testing.T) {
 					C(d string) (e string)
 				}`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(1),
+						checkArgs(
+							checkValue("d", stringType),
+						),
 						methodHasRetCount(1),
+						checkRets(
+							checkValue("e", stringType),
+						),
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(1),
-			// 		interfaceMethodHasRetCount(1),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 0,
-			// 		interfaceMethodArgExpectValue("d", "string", false),
-			// 	),
-			// 	checkInterfaceMethodRet(0, 0, 0,
-			// 		interfaceMethodRetExpectValue("e", "string"),
-			// 	),
-			// ),
 		}, {
 			"Unnamed args",
 			strings.NewReader(`
 				package a
 
 				type B interface {
-					C(string, string) int
+					C(string, int, string) (int, error)
 				}`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
-						methodHasArgCount(2),
-						methodHasRetCount(1),
+						methodHasArgCount(3),
+						checkArgs(
+							checkValue("stringArg1", stringType),
+							checkValue("intArg", intType),
+							checkValue("stringArg2", stringType),
+						),
+						methodHasRetCount(2),
+						checkRets(
+							checkValue("intResult", intType),
+							checkValue("errResult", errorType),
+						),
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(2),
-			// 		interfaceMethodHasRetCount(1),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 0,
-			// 		interfaceMethodArgExpectValue("arg1", "string", false),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 1,
-			// 		interfaceMethodArgExpectValue("arg2", "string", false),
-			// 	),
-			// 	checkInterfaceMethodRet(0, 0, 0,
-			// 		interfaceMethodRetExpectValue("ret1", "int"),
-			// 	),
-			// ),
 		}, {
 			"Minimal identifier",
 			strings.NewReader(`
@@ -295,44 +276,26 @@ func TestReadFile(t *testing.T) {
 					C(d, e string) (f int, g error)
 				}`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(2),
+						checkArgs(
+							checkValue("d", stringType),
+							checkValue("e", stringType),
+						),
 						methodHasRetCount(2),
+						checkRets(
+							checkValue("f", intType),
+							checkValue("g", errorType),
+						),
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(2),
-			// 		interfaceMethodHasRetCount(2),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 0,
-			// 		interfaceMethodArgExpectValue("d", "string", false),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 1,
-			// 		interfaceMethodArgExpectValue("e", "string", false),
-			// 	),
-			// 	checkInterfaceMethodRet(0, 0, 0,
-			// 		interfaceMethodRetExpectValue("f", "int"),
-			// 	),
-			// 	checkInterfaceMethodRet(0, 0, 1,
-			// 		interfaceMethodRetExpectValue("g", "error"),
-			// 	),
-			// ),
 		}, {
 			"Embedded interface same file",
 			strings.NewReader(`
@@ -348,120 +311,89 @@ func TestReadFile(t *testing.T) {
 					F(int) string
 				}`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(2),
-				checksInterface(1,
+				checkInterface(1,
 					interfaceHasName("E"),
 					interfaceHasMethodCount(3),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(0),
 						methodHasRetCount(1),
+						checkRets(
+							checkValue("stringResult", stringType),
+						),
 					),
 					checkMethod(1,
 						methodHasName("D"),
 						methodHasArgCount(0),
 						methodHasRetCount(1),
+						checkRets(
+							checkValue("stringResult", stringType),
+						),
 					),
 					checkMethod(2,
 						methodHasName("F"),
 						methodHasArgCount(1),
+						checkArgs(
+							checkValue("intArg", intType),
+						),
 						methodHasRetCount(1),
+						checkRets(
+							checkValue("stringResult", stringType),
+						),
 					),
 				),
 			),
-			// 	check(
-			// 		checkMock(
-			// 			hasInterfaceCount(2),
-			// 		),
-			// 		checkInterface(1,
-			// 			interfaceHasName("E"),
-			// 			interfaceHasMethodCount(3),
-			// 		),
-			// 		checkInterfaceMethod(1, 0,
-			// 			interfaceMethodHasName("C"),
-			// 			interfaceMethodHasArgCount(0),
-			// 			interfaceMethodHasRetCount(1),
-			// 		),
-			// 		checkInterfaceMethod(1, 1,
-			// 			interfaceMethodHasName("D"),
-			// 			interfaceMethodHasArgCount(0),
-			// 			interfaceMethodHasRetCount(1),
-			// 		),
-			// 		checkInterfaceMethod(1, 2,
-			// 			interfaceMethodHasName("F"),
-			// 			interfaceMethodHasArgCount(1),
-			// 			interfaceMethodHasRetCount(1),
-			// 		),
-			// 	),
+			// },
+			// // NOTE: embedded interfaces in different files not supported right now
+		}, {
+			"Embedded interface different file",
+			strings.NewReader(`
+		     package a
+
+				import "io"
+
+				type B interface {
+					io.Reader
+					C() string
+				}`,
+			),
+			check(
+				expectInterfaceCount(1),
+				checkInterface(0,
+					interfaceHasName("B"),
+					interfaceHasMethodCount(2),
+					checkMethod(0,
+						methodHasName("Read"),
+						methodHasArgCount(1),
+					),
+				),
+			),
 		},
-		// NOTE: embedded interfaces in different files not supported right now
-		// }, {
-		//  "Embedded interface different file",
-		//  strings.NewReader(`
-		//      package a
-
-		// 		import "io"
-
-		// 		type B interface {
-		// 			io.Reader
-		// 			C() string
-		// 		}`,
-		// 	),
-		// 	check(
-		// 		checkMock(
-		// 			hasInterfaceCount(1),
-		// 		),
-		// 		checkInterface(0,
-		// 			interfaceHasName("B"),
-		// 			interfaceHasMethodCount(2),
-		// 		),
-		// 		checkInterfaceMethod(0, 0,
-		// 			interfaceMethodHasName("Reader"),
-		// 		),
-		// 	),
-		// },
 		{
 			"Variadic args",
 			strings.NewReader(`
 				package a
 
 				type B interface {
-					C(...string) string
+					C(...string)
 				}`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(1),
-						methodHasRetCount(1),
+						checkArgs(
+							checkValue("stringVarArg", ellipseType(stringType)),
+						),
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(1),
-			// 		interfaceMethodHasRetCount(1),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 0,
-			// 		interfaceMethodArgExpectValue("arg1", "string", true),
-			// 	),
-			// 	checkInterfaceMethodRet(0, 0, 0,
-			// 		interfaceMethodRetExpectValue("ret1", "string"),
-			// 	),
-			// ),
 		}, {
 			"No returns method",
 			strings.NewReader(`
@@ -471,9 +403,9 @@ func TestReadFile(t *testing.T) {
 					C()
 				}`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
@@ -483,20 +415,6 @@ func TestReadFile(t *testing.T) {
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(0),
-			// 		interfaceMethodHasRetCount(0),
-			// 	),
-			// ),
 		}, {
 			"Type value declared from other file",
 			strings.NewReader(`
@@ -507,35 +425,21 @@ func TestReadFile(t *testing.T) {
 				}
 				`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(1),
+						checkArgs(
+							checkValue("bufferArg", bytesSelector),
+						),
 						methodHasRetCount(0),
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(1),
-			// 		interfaceMethodHasRetCount(0),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 0,
-			// 		interfaceMethodArgExpectValue("arg1", "bytes.Buffer", false),
-			// 	),
-			// ),
 		}, {
 			"Array values",
 			strings.NewReader(`
@@ -546,41 +450,25 @@ func TestReadFile(t *testing.T) {
 				}
 				`,
 			),
-			checks(
+			check(
 				expectInterfaceCount(1),
-				checksInterface(0,
+				checkInterface(0,
 					interfaceHasName("B"),
 					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(2),
+						checkArgs(
+							checkValue("stringArrArg", arrayType(arrayType(stringType))),
+							checkValue("bufferArrArg", arrayType(bytesSelector)),
+						),
 						methodHasRetCount(1),
+						checkRets(
+							checkValue("errArrResult", arrayType(errorType)),
+						),
 					),
 				),
 			),
-			// check(
-			// 	checkMock(
-			// 		hasInterfaceCount(1),
-			// 	),
-			// 	checkInterface(0,
-			// 		interfaceHasName("B"),
-			// 		interfaceHasMethodCount(1),
-			// 	),
-			// 	checkInterfaceMethod(0, 0,
-			// 		interfaceMethodHasName("C"),
-			// 		interfaceMethodHasArgCount(2),
-			// 		interfaceMethodHasRetCount(1),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 0,
-			// 		interfaceMethodArgExpectValue("arg1", "[][]string", false),
-			// 	),
-			// 	checkInterfaceMethodArg(0, 0, 1,
-			// 		interfaceMethodArgExpectValue("arg2", "[]bytes.Buffer", false),
-			// 	),
-			// 	checkInterfaceMethodRet(0, 0, 0,
-			// 		interfaceMethodRetExpectValue("ret1", "[]error"),
-			// 	),
-			// ),
 		},
 	}
 

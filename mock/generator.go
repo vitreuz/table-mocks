@@ -6,7 +6,6 @@ import (
 	"go/format"
 	"go/token"
 	"os"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -102,8 +101,8 @@ func (meth Method) generateInterfaceMethod(ifceName string) *ast.FuncDecl {
 
 	params := fieldList()
 	for _, arg := range meth.Args {
-		params.List = append(params.List, arg.variable(false))
-		body.List = append(body.List, arg.assignToField(fakeMethod, false))
+		params.List = append(params.List, arg.variable())
+		body.List = append(body.List, arg.assignToField(fakeMethod))
 	}
 
 	body.List = append(body.List, []ast.Stmt{
@@ -124,8 +123,8 @@ func (meth Method) generateInterfaceMethod(ifceName string) *ast.FuncDecl {
 	results := fieldList()
 	returns := &ast.ReturnStmt{}
 	for _, ret := range meth.Rets {
-		results.List = append(results.List, ret.variable(true))
-		returns.Results = append(returns.Results, selectorExpr(fakeMethod, ret.fieldName(true)))
+		results.List = append(results.List, ret.variable())
+		returns.Results = append(returns.Results, selectorExpr(fakeMethod, ret.fieldName()))
 	}
 
 	body.List = append(body.List, returns)
@@ -184,8 +183,8 @@ func (meth Method) generateReturns(ifceName string) *ast.FuncDecl {
 	)
 
 	for _, ret := range meth.Rets {
-		params.List = append(params.List, field(ret.Type, ret.argName(true)))
-		body.List = append(body.List, ret.assignToField(fakeMethod, true))
+		params.List = append(params.List, field(ret.Type, ret.argName()))
+		body.List = append(body.List, ret.assignToField(fakeMethod))
 	}
 
 	body.List = append(body.List, []ast.Stmt{
@@ -209,18 +208,18 @@ func (meth Method) generateReturns(ifceName string) *ast.FuncDecl {
 	return funcDecl(recv, name, params, results, body)
 }
 
-func (val Value) assignToField(method ast.Expr, isResult bool) *ast.AssignStmt {
+func (val Value) assignToField(method ast.Expr) *ast.AssignStmt {
 	return &ast.AssignStmt{
-		Lhs: expression(selectorExpr(method, val.fieldName(isResult))),
-		Rhs: expression(ast.NewIdent(val.argName(isResult))),
+		Lhs: expression(selectorExpr(method, val.fieldName())),
+		Rhs: expression(ast.NewIdent(val.argName())),
 		Tok: token.ASSIGN,
 	}
 }
 
-func (val Value) assignToVar(method ast.Expr, isResult bool) *ast.AssignStmt {
+func (val Value) assignToVar(method ast.Expr) *ast.AssignStmt {
 	return &ast.AssignStmt{
-		Lhs: expression(ast.NewIdent(val.argName(isResult))),
-		Rhs: expression(selectorExpr(method, val.fieldName(isResult))),
+		Lhs: expression(ast.NewIdent(val.argName())),
+		Rhs: expression(selectorExpr(method, val.fieldName())),
 		Tok: token.ASSIGN,
 	}
 }
@@ -234,9 +233,9 @@ func (meth Method) generateGetArgs(ifceName string) *ast.FuncDecl {
 	returns := expression()
 
 	for _, arg := range meth.Args {
-		results.List = append(results.List, field(arg.Type, arg.argName(false)))
-		returns = append(returns, ast.NewIdent(arg.argName(false)))
-		body.List = append(body.List, arg.assignToVar(valueIndex(fakeMethodField, "0"), false))
+		results.List = append(results.List, field(arg.Type, arg.argName()))
+		returns = append(returns, ast.NewIdent(arg.argName()))
+		body.List = append(body.List, arg.assignToVar(valueIndex(fakeMethodField, "0")))
 	}
 	body.List = append(body.List, []ast.Stmt{
 		&ast.ExprStmt{X: call(selectorExpr(fakeMethodMutex, "RUnlock"))},
@@ -343,25 +342,18 @@ func (ifce Interface) generateInterfaceStruct() ast.Decl {
 func (meth Method) generateMethodStruct(ifceName string) ast.Decl {
 	fieldList := []*ast.Field{}
 	for _, arg := range meth.Args {
-		fieldList = append(fieldList, arg.field(false))
+		fieldList = append(fieldList, arg.field())
 	}
 	fieldList = append(fieldList, field(ast.NewIdent("bool"), "Called"))
 	for _, res := range meth.Rets {
-		fieldList = append(fieldList, res.field(true))
+		fieldList = append(fieldList, res.field())
 	}
 
 	return generateStruct(toMethodStructName(ifceName, meth.Name), fieldList)
 }
 
-func (value Value) field(isResult bool) *ast.Field {
-	suffix := "Arg"
-	if isResult {
-		suffix = "Result"
-	}
-	name := strings.Title(value.Name) + suffix
-	if value.Repeat != 0 {
-		name += strconv.Itoa(value.Repeat)
-	}
+func (value Value) field() *ast.Field {
+	name := strings.Title(value.Name)
 
 	return &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(name)},
@@ -369,15 +361,8 @@ func (value Value) field(isResult bool) *ast.Field {
 	}
 }
 
-func (value Value) variable(isResult bool) *ast.Field {
-	suffix := "Arg"
-	if isResult {
-		suffix = "Result"
-	}
-	name := value.Name + suffix
-	if value.Repeat != 0 {
-		name += strconv.Itoa(value.Repeat)
-	}
+func (value Value) variable() *ast.Field {
+	name := value.Name
 
 	return &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(name)},
@@ -385,28 +370,12 @@ func (value Value) variable(isResult bool) *ast.Field {
 	}
 }
 
-func (value Value) fieldName(isResult bool) string {
-	suffix := "Arg"
-	if isResult {
-		suffix = "Result"
-	}
-
-	if value.Repeat == 0 {
-		return strings.Title(value.Name) + suffix
-	}
-	return strings.Title(value.Name) + suffix + strconv.Itoa(value.Repeat)
+func (value Value) fieldName() string {
+	return strings.Title(value.Name)
 }
 
-func (value Value) argName(isResult bool) string {
-	suffix := "Arg"
-	if isResult {
-		suffix = "Result"
-	}
-
-	if value.Repeat == 0 {
-		return value.Name + suffix
-	}
-	return value.Name + suffix + strconv.Itoa(value.Repeat)
+func (value Value) argName() string {
+	return value.Name
 }
 
 func (method Method) fieldName() string {
@@ -450,4 +419,12 @@ func generateStruct(name string, fieldList []*ast.Field) *ast.GenDecl {
 			},
 		},
 	}
+}
+
+func lowerFirst(str string) string {
+	if str == "" {
+		return ""
+	}
+	r, n := utf8.DecodeRuneInString(str)
+	return string(unicode.ToLower(r)) + str[n:]
 }
