@@ -432,16 +432,12 @@ func TestReadPkg(t *testing.T) {
 					interfaceHasName("B"),
 					interfaceHasMethodCount(3),
 					checkMethod(0,
-						methodHasName("E"),
+						methodHasName("Read"),
 						methodHasArgCount(0),
 					),
 					checkMethod(1,
-						methodHasName("D"),
-						methodHasArgCount(0),
-					),
-					checkMethod(2,
 						methodHasName("C"),
-						methodHasArgCount(0),
+						methodHasRetCount(1),
 					),
 				),
 			),
@@ -539,6 +535,32 @@ func TestReadPkg(t *testing.T) {
 						methodHasRetCount(1),
 						checkRets(
 							checkValue("errArrResult", arrayType(errorType)),
+						),
+					),
+				),
+			),
+		}, {
+			"Using a package struct type",
+			pkg(file(`
+				package a
+
+				type B struct {}
+
+				type C interface{
+					D(B)
+				}
+				`,
+			)),
+			check(
+				expectInterfaceCount(1),
+				checkInterface(0,
+					interfaceHasName("C"),
+					interfaceHasMethodCount(1),
+					checkMethod(0,
+						methodHasName("D"),
+						methodHasArgCount(1),
+						checkArgs(
+							checkValue("bArg", selectorType(ast.NewIdent("a"), "B")),
 						),
 					),
 				),

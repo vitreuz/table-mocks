@@ -42,6 +42,14 @@ type Value struct {
 
 var fset *token.FileSet
 
+type packageParser struct {
+	pkg *ast.Ident
+}
+
+func NewPackageParser(pkg *ast.Ident) *packageParser {
+	return &packageParser{pkg: pkg}
+}
+
 type fileReader struct{}
 
 func ReadPkg(dir string) *Mock {
@@ -84,13 +92,14 @@ func ReadPkg(dir string) *Mock {
 			logrus.WithField("file_name", fname).Println("parings file")
 
 			node := pkg.Files[fname]
+			pp := NewPackageParser(node.Name)
 
 			// TODO: find a way to pass the scope to fix embedded interfaces
 			for _, d := range genDecls(node) {
 				specToks := interfaceSpecTokens(d)
 
 				for _, specTok := range specToks {
-					mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok, pkg.Scope))
+					mock.Interfaces = append(mock.Interfaces, pp.parseInterfaceToken(specTok, pkg.Scope))
 				}
 			}
 		}
@@ -116,8 +125,9 @@ func ReadFile(reader io.Reader) *Mock {
 	for _, d := range genDecls(node) {
 		specToks := interfaceSpecTokens(d)
 
+		pkg := new(packageParser)
 		for _, specTok := range specToks {
-			mock.Interfaces = append(mock.Interfaces, parseInterfaceToken(specTok, nil))
+			mock.Interfaces = append(mock.Interfaces, pkg.parseInterfaceToken(specTok, nil))
 		}
 	}
 
@@ -152,17 +162,17 @@ func interfaceSpecTokens(node *ast.GenDecl) []*ast.TypeSpec {
 	return toks
 }
 
-func parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scope) Interface {
+func (pkg packageParser) parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scope) Interface {
 	itfcTok := tok.Type.(*ast.InterfaceType)
 	methods := []Method{}
 
 	for _, methTok := range itfcTok.Methods.List {
 		if specType, ok := embeddedInterface(methTok, scope); ok {
-			embedded := parseInterfaceToken(specType, scope)
+			embedded := pkg.parseInterfaceToken(specType, scope)
 			methods = append(methods, embedded.Methods...)
 			continue
 		}
-		methods = append(methods, parseMethodToken(methTok))
+		methods = append(methods, pkg.parseMethodToken(methTok))
 	}
 
 	return Interface{Name: tok.Name.Name, Methods: methods}
@@ -196,7 +206,7 @@ func embeddedInterface(tok *ast.Field, scope *ast.Scope) (*ast.TypeSpec, bool) {
 	return nil, false
 }
 
-func parseMethodToken(tok *ast.Field) Method {
+func (pkg packageParser) parseMethodToken(tok *ast.Field) Method {
 	var method Method
 
 	for _, idenTok := range tok.Names {
@@ -204,18 +214,18 @@ func parseMethodToken(tok *ast.Field) Method {
 	}
 
 	if funcTok, ok := tok.Type.(*ast.FuncType); ok {
-		method.Args, method.Rets = parseFuncToken(funcTok)
+		method.Args, method.Rets = pkg.parseFuncToken(funcTok)
 	}
 
 	return method
 }
 
-func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
+func (pkg packageParser) parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 
 	unnameArgs := make(map[string]repeat)
 	args := []Value{}
 	for ai, argTok := range tok.Params.List {
-		args = append(args, parseFieldToken(argTok, "Arg", unnameArgs, ai)...)
+		args = append(args, pkg.parseFieldToken(argTok, "Arg", unnameArgs, ai)...)
 	}
 
 	if tok.Results == nil {
@@ -224,7 +234,7 @@ func parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 	var rets []Value
 	unnamedRets := make(map[string]repeat)
 	for ri, ret := range tok.Results.List {
-		rets = append(rets, parseFieldToken(ret, "Result", unnamedRets, ri)...)
+		rets = append(rets, pkg.parseFieldToken(ret, "Result", unnamedRets, ri)...)
 	}
 
 	for _, arg := range unnameArgs {
@@ -246,10 +256,10 @@ type repeat struct {
 	first   int
 }
 
-func parseFieldToken(tok *ast.Field, fieldType string, unnamed map[string]repeat, i int) []Value {
+func (pkg packageParser) parseFieldToken(tok *ast.Field, fieldType string, unnamed map[string]repeat, i int) []Value {
 	value := []Value{}
 
-	valName, valType := parseType(tok.Type)
+	valName, valType := pkg.parseType(tok.Type)
 
 	if len(tok.Names) == 0 {
 		repeat, ok := unnamed[valName]
@@ -281,22 +291,27 @@ func parseFieldToken(tok *ast.Field, fieldType string, unnamed map[string]repeat
 	return value
 }
 
-func parseType(tok ast.Expr) (string, ast.Expr) {
+func (pkg packageParser) parseType(tok ast.Expr) (string, ast.Expr) {
 	switch typeTok := tok.(type) {
 	case *ast.Ident:
 		name := typeTok.Name
+		if typeTok.Obj != nil {
+			if typeTok.Obj.Kind == ast.Typ {
+				return lowerFirst(name), &ast.SelectorExpr{X: ast.NewIdent(pkg.pkg.Name), Sel: ast.NewIdent(typeTok.Name)}
+			}
+		}
 		if name == "error" {
 			name = "err"
 		}
 		return name, ast.NewIdent(typeTok.Name)
 	case *ast.Ellipsis:
-		name, expr := parseType(typeTok.Elt)
+		name, expr := pkg.parseType(typeTok.Elt)
 		return name + "Var", &ast.Ellipsis{Elt: expr}
 	case *ast.SelectorExpr:
-		_, expr := parseType(typeTok.X)
+		_, expr := pkg.parseType(typeTok.X)
 		return lowerFirst(typeTok.Sel.Name), &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(typeTok.Sel.Name)}
 	case *ast.ArrayType:
-		name, expr := parseType(typeTok.Elt)
+		name, expr := pkg.parseType(typeTok.Elt)
 		if !strings.HasSuffix(name, "Arr") {
 			name += "Arr"
 		}
