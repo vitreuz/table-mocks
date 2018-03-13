@@ -8,59 +8,76 @@ import (
 	"go/token"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/fatih/color"
 	"github.com/sergi/go-diff/diffmatchpatch"
 
 	. "github.com/vitreuz/table-mocks/mock"
 )
 
 func prefix(pre, text string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		lines[i] = pre + line
+	var printer func(...interface{}) string
+	switch pre {
+	case "+ ":
+		printer = color.New(color.FgGreen).SprintFunc()
+	case "- ":
+		printer = color.New(color.FgRed).SprintFunc()
+	default:
+		printer = fmt.Sprint
 	}
 
-	return strings.Join(lines, "\n")
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines)-1; i++ {
+		lines[i] = pre + lines[i]
+	}
+
+	return printer(strings.Join(lines, "\n"))
+}
+
+type checkReader func(io.Reader) []error
+
+func compareBuffers(expect, actual *bytes.Buffer) []error {
+	dmp := diffmatchpatch.New()
+	el, al, l := dmp.DiffLinesToChars(strings.TrimPrefix(expect.String(), "\n"), actual.String())
+	diffs := dmp.DiffCharsToLines(dmp.DiffMain(el, al, false), l)
+
+	if len(diffs) > 1 {
+		diffText := new(strings.Builder)
+		for _, diff := range diffs {
+			switch diff.Type {
+			case diffmatchpatch.DiffDelete:
+				fmt.Fprint(diffText, prefix("- ", diff.Text))
+			case diffmatchpatch.DiffInsert:
+				fmt.Fprint(diffText, prefix("+ ", diff.Text))
+			default:
+				fmt.Fprint(diffText, prefix("  ", diff.Text))
+			}
+		}
+
+		return []error{fmt.Errorf(
+			"output doesn't match:\n%s", diffText.String(),
+		)}
+	}
+
+	return nil
+}
+
+func expectReader(expected io.Reader) checkReader {
+	return func(actual io.Reader) []error {
+		e, a := new(bytes.Buffer), new(bytes.Buffer)
+		e.ReadFrom(expected)
+		a.ReadFrom(actual)
+
+		return compareBuffers(e, a)
+	}
 }
 
 func TestGenerateFile(t *testing.T) {
 	type checkFile func(*os.File) []error
 	check := func(fns ...checkFile) []checkFile { return fns }
-	// expectOutput := func(expectedFile io.Reader) checkFile {
-	// 	return func(file *os.File) []error {
-	// 		expect, actual := new(bytes.Buffer), new(bytes.Buffer)
-	// 		expect.ReadFrom(expectedFile)
-	// 		actual.ReadFrom(file)
-
-	// 		dmp := diffmatchpatch.New()
-	// 		expectLines, actualLines, lines := dmp.DiffLinesToChars(expect.String(), actual.String())
-	// 		diffs := dmp.DiffCharsToLines(dmp.DiffMain(expectLines, actualLines, true), lines)
-
-	// 		if len(diffs) > 1 {
-	// 			log.Println(len(diffs))
-	// 			diffText := new(strings.Builder)
-	// 			for _, diff := range diffs {
-	// 				switch diff.Type {
-	// 				case diffmatchpatch.DiffDelete:
-	// 					fmt.Fprintln(diffText, prefix("- ", diff.Text))
-	// 				case diffmatchpatch.DiffInsert:
-	// 					fmt.Fprintln(diffText, prefix("+ ", diff.Text))
-	// 				default:
-	// 					fmt.Fprintln(diffText, prefix("  ", diff.Text))
-	// 				}
-	// 			}
-	// 			return []error{fmt.Errorf(
-	// 				"output doesn't match:\n%s", diffText.String(),
-	// 			)}
-	// 		}
-
-	// 		return nil
-	// 	}
-	// }
 
 	tests := [...]struct {
 		name   string
@@ -79,25 +96,6 @@ func TestGenerateFile(t *testing.T) {
 				Imports: []string{"time"},
 			},
 			check(),
-			// 			check(
-			// 				expectOutput(strings.NewReader(
-			// 					`package fake
-
-			// import (
-			// 	"sync"
-			// 	"time"
-			// )
-
-			// type Runner struct {
-			// 	runMethod map[int]RunnerRunMethod
-			// 	runMutex  sync.RWMutex
-			// }
-			// type RunnerRunMethod struct {
-			// 	Called bool
-			// }
-			// `,
-			// 				)),
-			// 			),
 		},
 	}
 
@@ -125,44 +123,12 @@ func TestGenerateFile(t *testing.T) {
 }
 
 func TestGenerateStructs(t *testing.T) {
-	type checkFile func(*os.File) []error
-	check := func(fns ...checkFile) []checkFile { return fns }
-	expectOutput := func(expectedFile io.Reader) checkFile {
-		return func(file *os.File) []error {
-			expect, actual := new(bytes.Buffer), new(bytes.Buffer)
-			expect.ReadFrom(expectedFile)
-			actual.ReadFrom(file)
-
-			dmp := diffmatchpatch.New()
-			expectLines, actualLines, lines := dmp.DiffLinesToChars(expect.String(), actual.String())
-			diffs := dmp.DiffCharsToLines(dmp.DiffMain(expectLines, actualLines, false), lines)
-
-			if len(diffs) > 1 {
-				log.Println(len(diffs))
-				diffText := new(strings.Builder)
-				for _, diff := range diffs {
-					switch diff.Type {
-					case diffmatchpatch.DiffDelete:
-						fmt.Fprintln(diffText, prefix("- ", diff.Text))
-					case diffmatchpatch.DiffInsert:
-						fmt.Fprintln(diffText, prefix("+ ", diff.Text))
-					default:
-						fmt.Fprintln(diffText, prefix("  ", diff.Text))
-					}
-				}
-				return []error{fmt.Errorf(
-					"output doesn't match:\n%s", diffText.String(),
-				)}
-			}
-
-			return nil
-		}
-	}
+	check := func(fns ...checkReader) []checkReader { return fns }
 
 	tests := [...]struct {
 		name   string
 		input  *Interface
-		checks []checkFile
+		checks []checkReader
 	}{
 		{
 			"Simple generate",
@@ -193,14 +159,14 @@ func TestGenerateStructs(t *testing.T) {
 				},
 			},
 			check(
-				expectOutput(strings.NewReader(
-					`type Runner struct {
+				expectReader(strings.NewReader(`
+type Runner struct {
 	runMethod map[int]RunnerRunMethod
 	runMutex  sync.RWMutex
+	runCalls  int
 }
 type RunnerRunMethod struct {
 	DistanceArg    int
-	Called         bool
 	DurationResult time.Duration
 	ErrResult      error
 }`,
@@ -237,44 +203,12 @@ type RunnerRunMethod struct {
 }
 
 func TestGenerateMethods(t *testing.T) {
-	type checkFile func(*os.File) []error
-	check := func(fns ...checkFile) []checkFile { return fns }
-	expectOutput := func(expectedFile io.Reader) checkFile {
-		return func(file *os.File) []error {
-			expect, actual := new(bytes.Buffer), new(bytes.Buffer)
-			expect.ReadFrom(expectedFile)
-			actual.ReadFrom(file)
-
-			dmp := diffmatchpatch.New()
-			expectLines, actualLines, lines := dmp.DiffLinesToChars(expect.String(), actual.String())
-			diffs := dmp.DiffCharsToLines(dmp.DiffMain(expectLines, actualLines, false), lines)
-
-			if len(diffs) > 1 {
-				log.Println(len(diffs))
-				diffText := new(strings.Builder)
-				for _, diff := range diffs {
-					switch diff.Type {
-					case diffmatchpatch.DiffDelete:
-						fmt.Fprintln(diffText, prefix("- ", diff.Text))
-					case diffmatchpatch.DiffInsert:
-						fmt.Fprintln(diffText, prefix("+ ", diff.Text))
-					default:
-						fmt.Fprintln(diffText, prefix("  ", diff.Text))
-					}
-				}
-				return []error{fmt.Errorf(
-					"output doesn't match:\n%s", diffText.String(),
-				)}
-			}
-
-			return nil
-		}
-	}
+	check := func(fns ...checkReader) []checkReader { return fns }
 
 	tests := [...]struct {
 		name   string
 		input  *Interface
-		checks []checkFile
+		checks []checkReader
 	}{
 		{
 			"Simple generate",
@@ -305,7 +239,7 @@ func TestGenerateMethods(t *testing.T) {
 				},
 			},
 			check(
-				expectOutput(strings.NewReader(
+				expectReader(strings.NewReader(
 					`func NewRunner() *Runner {
 	fake := &Runner{}
 	fake.runMethod = make(map[int]RunnerRunMethod)
@@ -376,5 +310,255 @@ func (fake *Runner) RunForCall(call int, fns ...RunnerRunFunc) *Runner {
 				}
 			}
 		})
+	}
+}
+
+func TestGenerateInterfaceStruct(t *testing.T) {
+	check := func(fns ...checkReader) []checkReader { return fns }
+
+	tests := [...]struct {
+		name   string
+		ifce   Interface
+		checks []checkReader
+	}{
+		{
+			"Basic method",
+			newTestInterface("Runner").ToInterface(),
+			check(expectReader(strings.NewReader(`
+type Runner struct {
+}`,
+			))),
+		}, {
+			"Simple params",
+			newTestInterface("Runner").
+				WithMethod(newTestMethod("Run")).
+				WithMethod(newTestMethod("Walk")).
+				ToInterface(),
+			check(expectReader(strings.NewReader(`
+type Runner struct {
+	runMethod map[int]RunnerRunMethod
+	runMutex  sync.RWMutex
+	runCalls  int
+
+	walkMethod map[int]RunnerWalkMethod
+	walkMutex  sync.RWMutex
+	walkCalls  int
+}`,
+			))),
+		},
+	}
+
+	for _, tt := range tests {
+		output := GenerateInterfaceStruct(tt.ifce)
+		for _, check := range tt.checks {
+			for _, checkErr := range check(strings.NewReader(output)) {
+				if checkErr != nil {
+					t.Error(checkErr)
+				}
+			}
+		}
+	}
+}
+
+func TestGenerateMethodStruct(t *testing.T) {
+	check := func(fns ...checkReader) []checkReader { return fns }
+
+	tests := [...]struct {
+		name   string
+		ifce   string
+		meth   Method
+		checks []checkReader
+	}{
+		{
+			"Basic method",
+			"Runner",
+			newTestMethod("Run").ToMethod(),
+			check(expectReader(strings.NewReader(`
+type RunnerRunMethod struct {
+}`,
+			))),
+		}, {
+			"Simple params",
+			"Runner",
+			newTestMethod("Run").
+				WithArg(newTestValue("distanceArg")).
+				WithRet(newTestValue("timeResult")).
+				ToMethod(),
+			check(expectReader(strings.NewReader(`
+type RunnerRunMethod struct {
+	DistanceArg string
+	TimeResult  string
+}`,
+			))),
+		}, {
+			"With variadic params",
+			"Runner",
+			newTestMethod("Run").
+				WithArg(newTestValue("distanceArg").asEllipse()).
+				WithRet(newTestValue("timeResult")).
+				ToMethod(),
+			check(expectReader(strings.NewReader(`
+type RunnerRunMethod struct {
+	DistanceArg []string
+	TimeResult  string
+}`,
+			))),
+		},
+	}
+
+	for _, tt := range tests {
+		output := GenerateMethodStruct(tt.ifce, tt.meth)
+		for _, check := range tt.checks {
+			for _, checkErr := range check(strings.NewReader(output)) {
+				if checkErr != nil {
+					t.Error(checkErr)
+				}
+			}
+		}
+	}
+}
+
+func TestGenerateMethodFunc(t *testing.T) {
+	check := func(fns ...checkReader) []checkReader { return fns }
+
+	tests := [...]struct {
+		name   string
+		ifce   string
+		meth   Method
+		checks []checkReader
+	}{
+		{
+			"Basic method",
+			"Runner",
+			newTestMethod("Run").ToMethod(),
+			check(expectReader(strings.NewReader(`
+func (fake *Runner) Run() {
+	fake.runMutex.Lock()
+	fakeMethod := fake.runMethod[fake.runCalls]
+	fake.runMethod[fake.runCalls] = fakeMethod
+	fake.runCalls++
+	fake.runMutex.Unlock()
+
+	return
+}`,
+			))),
+		}, {
+			"Simple params",
+			"Runner",
+			newTestMethod("Run").
+				WithArg(newTestValue("distanceArg")).
+				WithRet(newTestValue("timeResult")).
+				ToMethod(),
+			check(expectReader(strings.NewReader(`
+func (fake *Runner) Run(distanceArg string) (timeResult string) {
+	fake.runMutex.Lock()
+	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod.DistanceArg = distanceArg
+	fake.runMethod[fake.runCalls] = fakeMethod
+	fake.runCalls++
+	fake.runMutex.Unlock()
+
+	return fakeMethod.TimeResult
+}`,
+			))),
+		}, {
+			"With variadic params",
+			"Runner",
+			newTestMethod("Run").
+				WithArg(newTestValue("distanceArg").asEllipse()).
+				WithRet(newTestValue("timeResult")).
+				ToMethod(),
+			check(expectReader(strings.NewReader(`
+func (fake *Runner) Run(distanceArg ...string) (timeResult string) {
+	fake.runMutex.Lock()
+	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod.DistanceArg = distanceArg
+	fake.runMethod[fake.runCalls] = fakeMethod
+	fake.runCalls++
+	fake.runMutex.Unlock()
+
+	return fakeMethod.TimeResult
+}`,
+			))),
+		},
+	}
+
+	for _, tt := range tests {
+		output := GenerateMethodFunc(tt.ifce, tt.meth)
+		for _, check := range tt.checks {
+			for _, checkErr := range check(strings.NewReader(output)) {
+				if checkErr != nil {
+					t.Error(checkErr)
+				}
+			}
+		}
+	}
+}
+
+func TestGenerateMethodGetArgs(t *testing.T) {
+	check := func(fns ...checkReader) []checkReader { return fns }
+
+	tests := [...]struct {
+		name   string
+		ifce   string
+		meth   Method
+		checks []checkReader
+	}{
+		{
+			"Basic method",
+			"Runner",
+			newTestMethod("Run").ToMethod(),
+			check(expectReader(strings.NewReader(`
+func (fake *Runner) RunGetArgs() {
+	fake.runMutex.RLock()
+	fake.runMutex.RUnlock()
+
+	return
+}`,
+			))),
+		}, {
+			"Simple params",
+			"Runner",
+			newTestMethod("Run").
+				WithArg(newTestValue("distanceArg")).
+				WithRet(newTestValue("timeResult")).
+				ToMethod(),
+			check(expectReader(strings.NewReader(`
+func (fake *Runner) RunGetArgs() (distanceArg string) {
+	fake.runMutex.RLock()
+	distanceArg = fake.runMethod[0].DistanceArg
+	fake.runMutex.RUnlock()
+
+	return distanceArg
+}`,
+			))),
+		}, {
+			"With variadic params",
+			"Runner",
+			newTestMethod("Run").
+				WithArg(newTestValue("distanceArg").asEllipse()).
+				WithRet(newTestValue("timeResult")).
+				ToMethod(),
+			check(expectReader(strings.NewReader(`
+func (fake *Runner) RunGetArgs() (distanceArg []string) {
+	fake.runMutex.RLock()
+	distanceArg = fake.runMethod[0].DistanceArg
+	fake.runMutex.RUnlock()
+
+	return distanceArg
+}`,
+			))),
+		},
+	}
+
+	for _, tt := range tests {
+		output := GenerateMethodGetArgs(tt.ifce, tt.meth)
+		for _, check := range tt.checks {
+			for _, checkErr := range check(strings.NewReader(output)) {
+				if checkErr != nil {
+					t.Error(checkErr)
+				}
+			}
+		}
 	}
 }

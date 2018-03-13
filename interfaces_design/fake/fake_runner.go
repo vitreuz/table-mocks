@@ -13,10 +13,8 @@ type Runner struct {
 
 type RunnerRunMethod struct {
 	DistanceArg int
-
-	Called     bool
-	TimeResult time.Duration
-	ErrResult  error
+	TimeResult  time.Duration
+	ErrResult   error
 }
 
 func NewRunner() *Runner {

@@ -3,6 +3,7 @@ package mock
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io"
@@ -43,7 +44,8 @@ type Value struct {
 var fset *token.FileSet
 
 type packageParser struct {
-	pkg *ast.Ident
+	pkg     *ast.Ident
+	imports map[string]struct{}
 }
 
 func NewPackageParser(pkg *ast.Ident) *packageParser {
@@ -53,7 +55,15 @@ func NewPackageParser(pkg *ast.Ident) *packageParser {
 type fileReader struct{}
 
 func ReadPkg(dir string) *Mock {
-	logrus.WithField("dir", dir).Println("reading dir")
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		gopath = build.Default.GOPATH
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"gopath": gopath,
+		"dir":    dir,
+	}).Println("reading dir")
 
 	fset = token.NewFileSet()
 	noTests := func(f os.FileInfo) bool { return !strings.Contains(f.Name(), "_test") }
@@ -94,14 +104,34 @@ func ReadPkg(dir string) *Mock {
 			node := pkg.Files[fname]
 			pp := NewPackageParser(node.Name)
 
+			importCache := make(map[string]string)
+			for _, imp := range node.Imports {
+				dir := strings.Trim(imp.Path.Value, "\"")
+				pkg, err := build.Default.Import(dir, gopath, 0)
+				if err != nil {
+					panic(err)
+				}
+
+				importCache[pkg.Name] = dir
+			}
+
 			// TODO: find a way to pass the scope to fix embedded interfaces
 			for _, d := range genDecls(node) {
 				specToks := interfaceSpecTokens(d)
 
 				for _, specTok := range specToks {
-					mock.Interfaces = append(mock.Interfaces, pp.parseInterfaceToken(specTok, pkg.Scope))
+					pp.imports = make(map[string]struct{})
+					ifce := pp.parseInterfaceToken(specTok, pkg.Scope)
+					for imp := range pp.imports {
+						if pack, ok := importCache[imp]; ok {
+							ifce.Imports = append(ifce.Imports, pack)
+						}
+					}
+
+					mock.Interfaces = append(mock.Interfaces, ifce)
 				}
 			}
+
 		}
 	}
 
@@ -162,7 +192,7 @@ func interfaceSpecTokens(node *ast.GenDecl) []*ast.TypeSpec {
 	return toks
 }
 
-func (pkg packageParser) parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scope) Interface {
+func (pkg *packageParser) parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scope) Interface {
 	itfcTok := tok.Type.(*ast.InterfaceType)
 	methods := []Method{}
 
@@ -206,7 +236,7 @@ func embeddedInterface(tok *ast.Field, scope *ast.Scope) (*ast.TypeSpec, bool) {
 	return nil, false
 }
 
-func (pkg packageParser) parseMethodToken(tok *ast.Field) Method {
+func (pkg *packageParser) parseMethodToken(tok *ast.Field) Method {
 	var method Method
 
 	for _, idenTok := range tok.Names {
@@ -220,7 +250,7 @@ func (pkg packageParser) parseMethodToken(tok *ast.Field) Method {
 	return method
 }
 
-func (pkg packageParser) parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
+func (pkg *packageParser) parseFuncToken(tok *ast.FuncType) ([]Value, []Value) {
 
 	unnameArgs := make(map[string]repeat)
 	args := []Value{}
@@ -256,7 +286,7 @@ type repeat struct {
 	first   int
 }
 
-func (pkg packageParser) parseFieldToken(tok *ast.Field, fieldType string, unnamed map[string]repeat, i int) []Value {
+func (pkg *packageParser) parseFieldToken(tok *ast.Field, fieldType string, unnamed map[string]repeat, i int) []Value {
 	value := []Value{}
 
 	valName, valType := pkg.parseType(tok.Type)
@@ -291,7 +321,7 @@ func (pkg packageParser) parseFieldToken(tok *ast.Field, fieldType string, unnam
 	return value
 }
 
-func (pkg packageParser) parseType(tok ast.Expr) (string, ast.Expr) {
+func (pkg *packageParser) parseType(tok ast.Expr) (string, ast.Expr) {
 	switch typeTok := tok.(type) {
 	case *ast.Ident:
 		name := typeTok.Name
@@ -309,6 +339,9 @@ func (pkg packageParser) parseType(tok ast.Expr) (string, ast.Expr) {
 		return name + "Var", &ast.Ellipsis{Elt: expr}
 	case *ast.SelectorExpr:
 		_, expr := pkg.parseType(typeTok.X)
+		if id, ok := expr.(*ast.Ident); ok {
+			pkg.imports[id.Name] = struct{}{}
+		}
 		return lowerFirst(typeTok.Sel.Name), &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(typeTok.Sel.Name)}
 	case *ast.ArrayType:
 		name, expr := pkg.parseType(typeTok.Elt)

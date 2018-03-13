@@ -26,10 +26,7 @@ func (m *Interface) addSyncImport() {
 func (ifce Interface) ToFile(pkg string) *ast.File {
 	node := &ast.File{Name: ast.NewIdent("fake")}
 
-	if len(ifce.Imports) > 1 {
-		node.Decls = ifce.toImports()
-	}
-
+	node.Decls = ifce.toImports()
 	node.Decls = append(node.Decls, ifce.GenerateStructs()...)
 	node.Decls = append(node.Decls, ifce.GenerateMethods()...)
 
@@ -79,6 +76,54 @@ func (ifce Interface) GenerateMethods() []ast.Decl {
 		decls = append(decls, ifceMethod, returns, getArgs, callbck, forCall)
 	}
 	return decls
+}
+
+func cleanReturn(s *strings.Builder) string {
+	return strings.Replace(s.String(), "\n\treturn", "\n\n\treturn", -1)
+}
+
+func GenerateInterfaceStruct(ifce Interface) string {
+	node := ifce.generateInterfaceStruct()
+
+	buf := new(strings.Builder)
+	format.Node(buf, token.NewFileSet(), node)
+
+	// TODO: this isn't elegant. If possible clean this up later
+	s := strings.Replace(buf.String(), "int\n", "int\n\n", -1)
+	s = strings.Replace(s, "\n\n}", "\n}", -1)
+	b, err := format.Source([]byte(s))
+	if err != nil {
+		panic(err)
+	}
+
+	return string(b)
+}
+
+func GenerateMethodStruct(ifce string, method Method) string {
+	node := method.generateMethodStruct(ifce)
+
+	buf := new(strings.Builder)
+	format.Node(buf, token.NewFileSet(), node)
+
+	return buf.String()
+}
+
+func GenerateMethodFunc(ifce string, method Method) string {
+	node := method.generateInterfaceMethod(ifce)
+
+	buf := new(strings.Builder)
+	format.Node(buf, token.NewFileSet(), node)
+
+	return cleanReturn(buf)
+}
+
+func GenerateMethodGetArgs(ifce string, method Method) string {
+	node := method.generateGetArgs(ifce)
+
+	buf := new(strings.Builder)
+	format.Node(buf, token.NewFileSet(), node)
+
+	return cleanReturn(buf)
 }
 
 func (meth Method) generateInterfaceMethod(ifceName string) *ast.FuncDecl {
@@ -233,7 +278,8 @@ func (meth Method) generateGetArgs(ifceName string) *ast.FuncDecl {
 	returns := expression()
 
 	for _, arg := range meth.Args {
-		results.List = append(results.List, field(arg.Type, arg.argName()))
+		typ := resolveAssignType(arg.Type)
+		results.List = append(results.List, field(typ, arg.argName()))
 		returns = append(returns, ast.NewIdent(arg.argName()))
 		body.List = append(body.List, arg.assignToVar(valueIndex(fakeMethodField, "0")))
 	}
@@ -332,8 +378,12 @@ func (ifce Interface) generateInterfaceStruct() ast.Decl {
 			selectorExpr(ast.NewIdent("sync"), "RWMutex"),
 			method.mutexName(),
 		)
+		methRunCalls := field(
+			ast.NewIdent("int"),
+			method.callsName(),
+		)
 
-		fieldList = append(fieldList, methField, methMutex)
+		fieldList = append(fieldList, methField, methMutex, methRunCalls)
 	}
 
 	return generateStruct(ifce.Name, fieldList)
@@ -344,7 +394,6 @@ func (meth Method) generateMethodStruct(ifceName string) ast.Decl {
 	for _, arg := range meth.Args {
 		fieldList = append(fieldList, arg.field())
 	}
-	fieldList = append(fieldList, field(ast.NewIdent("bool"), "Called"))
 	for _, res := range meth.Rets {
 		fieldList = append(fieldList, res.field())
 	}
@@ -352,12 +401,20 @@ func (meth Method) generateMethodStruct(ifceName string) ast.Decl {
 	return generateStruct(toMethodStructName(ifceName, meth.Name), fieldList)
 }
 
+func resolveAssignType(typ ast.Expr) ast.Expr {
+	if t, ok := typ.(*ast.Ellipsis); ok {
+		return &ast.ArrayType{Elt: t.Elt}
+	}
+	return typ
+}
+
 func (value Value) field() *ast.Field {
 	name := strings.Title(value.Name)
+	typ := resolveAssignType(value.Type)
 
 	return &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(name)},
-		Type:  value.Type,
+		Type:  typ,
 	}
 }
 

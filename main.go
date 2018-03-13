@@ -24,16 +24,12 @@ func init() {
 func main() {
 	pflag.Parse()
 
-	f, err := os.Open(path)
-	if err != nil {
-		log.Fatal(err)
-	}
 	if fakeDir == "" {
 		fakeDir = filepath.Join(filepath.Dir(path), "fakes")
 	}
-	m := mock.ReadFile(f)
+	m := mock.ReadPkg(filepath.Dir(path))
 
-	if err := os.Mkdir(fakeDir, 0755); err != nil {
+	if err := os.MkdirAll(fakeDir, 0755); err != nil {
 		log.Fatal(err)
 	}
 	log.Println(fakeDir)
