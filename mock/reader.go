@@ -58,7 +58,7 @@ func NewPackageParser(pkg *ast.Ident) *packageParser {
 
 type fileReader struct{}
 
-func ReadPkg(dir string) *Mock {
+func ReadPkg(dir string, selects []string) *Mock {
 	gopath := os.Getenv("GOPATH")
 	if gopath == "" {
 		gopath = build.Default.GOPATH
@@ -106,6 +106,16 @@ func ReadPkg(dir string) *Mock {
 			logrus.WithField("file_name", fname).Println("parings file")
 
 			node := pkg.Files[fname]
+			if len(selects) > 0 {
+				ast.FilterFile(node, func(name string) bool {
+					for _, sel := range selects {
+						if name == sel {
+							return true
+						}
+					}
+					return false
+				})
+			}
 			pp := NewPackageParser(node.Name)
 			pp.scope = pkg.Scope.Objects
 

@@ -17,7 +17,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	m := mock.ReadPkg(filepath.Dir(path))
+	m := mock.ReadPkg(filepath.Dir(path), args.Select)
 
 	if err := os.MkdirAll(args.FakesDir, 0755); err != nil {
 		log.Fatal(err)
