@@ -518,7 +518,7 @@ func (method Method) mutexName() string {
 	return toMethodName(method.Name, "Mutex")
 }
 func (method Method) callsName() string {
-	return toMethodName(method.Name, "Calls")
+	return strings.Title(method.Name) + "Calls"
 }
 
 func (method Method) structName(ifceName string) string {

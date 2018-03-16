@@ -517,14 +517,11 @@ func TestReadPkg(t *testing.T) {
 
 				type B interface{
 					C([][]string, []bytes.Buffer) []error
-				}
 				`,
 			)),
 			check(
 				expectInterfaceCount(1),
 				checkInterface(0,
-					interfaceHasName("B"),
-					interfaceHasMethodCount(1),
 					checkMethod(0,
 						methodHasName("C"),
 						methodHasArgCount(2),
@@ -601,7 +598,7 @@ func TestReadPkg(t *testing.T) {
 			dir := tt.input
 			defer os.RemoveAll(dir)
 
-			mocks := ReadPkg(dir)
+			mocks := ReadPkg(dir, nil)
 			for _, check := range tt.checks {
 				for _, checkErr := range check(mocks) {
 					if checkErr != nil {

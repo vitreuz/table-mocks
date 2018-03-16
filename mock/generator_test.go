@@ -105,7 +105,7 @@ import (
 type Runner struct {
 	runMethod map[int]RunnerRunMethod
 	runMutex  sync.RWMutex
-	runCalls  int
+	RunCalls  int
 }
 
 type RunnerRunMethod struct {
@@ -122,10 +122,10 @@ func NewRunner() *Runner {
 
 func (fake *Runner) Run(distanceArg string) (durationResult time.Duration) {
 	fake.runMutex.Lock()
-	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod := fake.runMethod[fake.RunCalls]
 	fakeMethod.DistanceArg = distanceArg
-	fake.runMethod[fake.runCalls] = fakeMethod
-	fake.runCalls++
+	fake.runMethod[fake.RunCalls] = fakeMethod
+	fake.RunCalls++
 	fake.runMutex.Unlock()
 
 	return fakeMethod.DurationResult
@@ -230,7 +230,7 @@ func TestGenerateStructs(t *testing.T) {
 type Runner struct {
 	runMethod map[int]RunnerRunMethod
 	runMutex  sync.RWMutex
-	runCalls  int
+	RunCalls  int
 }
 type RunnerRunMethod struct {
 	DistanceArg    int
@@ -314,10 +314,10 @@ func TestGenerateMethods(t *testing.T) {
 }
 func (fake *Runner) Run(distanceArg int) (durationResult time.Duration, errResult error) {
 	fake.runMutex.Lock()
-	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod := fake.runMethod[fake.RunCalls]
 	fakeMethod.DistanceArg = distanceArg
-	fake.runMethod[fake.runCalls] = fakeMethod
-	fake.runCalls++
+	fake.runMethod[fake.RunCalls] = fakeMethod
+	fake.RunCalls++
 	fake.runMutex.Unlock()
 	return fakeMethod.DurationResult, fakeMethod.ErrResult
 }
@@ -406,11 +406,11 @@ type Runner struct {
 type Runner struct {
 	runMethod map[int]RunnerRunMethod
 	runMutex  sync.RWMutex
-	runCalls  int
+	RunCalls  int
 
 	walkMethod map[int]RunnerWalkMethod
 	walkMutex  sync.RWMutex
-	walkCalls  int
+	WalkCalls  int
 }
 `,
 			))),
@@ -506,9 +506,9 @@ func TestGenerateMethodFunc(t *testing.T) {
 			check(expectReader(strings.NewReader(`
 func (fake *Runner) Run() {
 	fake.runMutex.Lock()
-	fakeMethod := fake.runMethod[fake.runCalls]
-	fake.runMethod[fake.runCalls] = fakeMethod
-	fake.runCalls++
+	fakeMethod := fake.runMethod[fake.RunCalls]
+	fake.runMethod[fake.RunCalls] = fakeMethod
+	fake.RunCalls++
 	fake.runMutex.Unlock()
 
 	return
@@ -525,10 +525,10 @@ func (fake *Runner) Run() {
 			check(expectReader(strings.NewReader(`
 func (fake *Runner) Run(distanceArg string) (timeResult string) {
 	fake.runMutex.Lock()
-	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod := fake.runMethod[fake.RunCalls]
 	fakeMethod.DistanceArg = distanceArg
-	fake.runMethod[fake.runCalls] = fakeMethod
-	fake.runCalls++
+	fake.runMethod[fake.RunCalls] = fakeMethod
+	fake.RunCalls++
 	fake.runMutex.Unlock()
 
 	return fakeMethod.TimeResult
@@ -545,10 +545,10 @@ func (fake *Runner) Run(distanceArg string) (timeResult string) {
 			check(expectReader(strings.NewReader(`
 func (fake *Runner) Run(distanceArg ...string) (timeResult string) {
 	fake.runMutex.Lock()
-	fakeMethod := fake.runMethod[fake.runCalls]
+	fakeMethod := fake.runMethod[fake.RunCalls]
 	fakeMethod.DistanceArg = distanceArg
-	fake.runMethod[fake.runCalls] = fakeMethod
-	fake.runCalls++
+	fake.runMethod[fake.RunCalls] = fakeMethod
+	fake.RunCalls++
 	fake.runMutex.Unlock()
 
 	return fakeMethod.TimeResult
