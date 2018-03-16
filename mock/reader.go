@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -46,6 +47,9 @@ var fset *token.FileSet
 type packageParser struct {
 	pkg     *ast.Ident
 	imports map[string]struct{}
+	scope   map[string]*ast.Object
+
+	selfImport bool
 }
 
 func NewPackageParser(pkg *ast.Ident) *packageParser {
@@ -103,6 +107,7 @@ func ReadPkg(dir string) *Mock {
 
 			node := pkg.Files[fname]
 			pp := NewPackageParser(node.Name)
+			pp.scope = pkg.Scope.Objects
 
 			importCache := make(map[string]string)
 			for _, imp := range node.Imports {
@@ -121,11 +126,22 @@ func ReadPkg(dir string) *Mock {
 
 				for _, specTok := range specToks {
 					pp.imports = make(map[string]struct{})
-					ifce := pp.parseInterfaceToken(specTok, pkg.Scope)
+					ifce := pp.parseInterfaceToken(specTok)
 					for imp := range pp.imports {
 						if pack, ok := importCache[imp]; ok {
 							ifce.Imports = append(ifce.Imports, pack)
 						}
+					}
+					if pp.selfImport {
+						abs, err := filepath.Abs(dir)
+						if err != nil {
+							panic("cannot make path to file")
+						}
+						rel, err := filepath.Rel(filepath.Join(gopath, "src"), abs)
+						if err != nil {
+							panic("cannot make find in go path")
+						}
+						ifce.Imports = append(ifce.Imports, rel)
 					}
 
 					mock.Interfaces = append(mock.Interfaces, ifce)
@@ -157,7 +173,7 @@ func ReadFile(reader io.Reader) *Mock {
 
 		pkg := new(packageParser)
 		for _, specTok := range specToks {
-			mock.Interfaces = append(mock.Interfaces, pkg.parseInterfaceToken(specTok, nil))
+			mock.Interfaces = append(mock.Interfaces, pkg.parseInterfaceToken(specTok))
 		}
 	}
 
@@ -192,13 +208,13 @@ func interfaceSpecTokens(node *ast.GenDecl) []*ast.TypeSpec {
 	return toks
 }
 
-func (pkg *packageParser) parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scope) Interface {
+func (pkg *packageParser) parseInterfaceToken(tok *ast.TypeSpec) Interface {
 	itfcTok := tok.Type.(*ast.InterfaceType)
 	methods := []Method{}
 
 	for _, methTok := range itfcTok.Methods.List {
-		if specType, ok := embeddedInterface(methTok, scope); ok {
-			embedded := pkg.parseInterfaceToken(specType, scope)
+		if specType, ok := embeddedInterface(methTok, pkg.scope); ok {
+			embedded := pkg.parseInterfaceToken(specType)
 			methods = append(methods, embedded.Methods...)
 			continue
 		}
@@ -211,7 +227,7 @@ func (pkg *packageParser) parseInterfaceToken(tok *ast.TypeSpec, scope *ast.Scop
 // embeddedInterface returns any embedded interfaces or false otherwise. An
 // embedded interface can be determined by checking the Names attribute. Methods
 // have a Names tokens, whereas embedded interfaces do not.
-func embeddedInterface(tok *ast.Field, scope *ast.Scope) (*ast.TypeSpec, bool) {
+func embeddedInterface(tok *ast.Field, scope map[string]*ast.Object) (*ast.TypeSpec, bool) {
 	if len(tok.Names) > 0 {
 		return nil, false
 	}
@@ -220,7 +236,7 @@ func embeddedInterface(tok *ast.Field, scope *ast.Scope) (*ast.TypeSpec, bool) {
 	case *ast.Ident:
 		obj := tokType.Obj
 		if tokType.Obj == nil {
-			obj = scope.Objects[tokType.Name]
+			obj = scope[tokType.Name]
 		}
 
 		if specTok, ok := obj.Decl.(*ast.TypeSpec); ok {
@@ -325,10 +341,9 @@ func (pkg *packageParser) parseType(tok ast.Expr) (string, ast.Expr) {
 	switch typeTok := tok.(type) {
 	case *ast.Ident:
 		name := typeTok.Name
-		if typeTok.Obj != nil {
-			if typeTok.Obj.Kind == ast.Typ {
-				return lowerFirst(name), &ast.SelectorExpr{X: ast.NewIdent(pkg.pkg.Name), Sel: ast.NewIdent(typeTok.Name)}
-			}
+		if _, ok := pkg.scope[name]; ok {
+			pkg.selfImport = true
+			return lowerFirst(name), &ast.SelectorExpr{X: ast.NewIdent(pkg.pkg.Name), Sel: ast.NewIdent(typeTok.Name)}
 		}
 		if name == "error" {
 			name = "err"

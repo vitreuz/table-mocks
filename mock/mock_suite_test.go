@@ -2,9 +2,19 @@ package mock_test
 
 import (
 	"go/ast"
+	"os"
+	"testing"
+
+	"github.com/sirupsen/logrus"
 
 	. "github.com/vitreuz/table-mocks/mock"
 )
+
+func MainTest(m *testing.M) {
+	logrus.SetLevel(logrus.PanicLevel)
+
+	os.Exit(m.Run())
+}
 
 type testInterface struct {
 	Interface
@@ -19,7 +29,12 @@ func (t testInterface) WithMethod(method testMethod) testInterface {
 	return t
 }
 
-func (t testInterface) ToInterface() Interface { return t.Interface }
+func (t testInterface) WithImport(imp string) testInterface {
+	t.Imports = append(t.Imports, imp)
+	return t
+}
+
+func (t testInterface) ToInterface() *Interface { return &t.Interface }
 
 // METHOD
 
@@ -53,6 +68,11 @@ func newTestValue(name string) testValue {
 }
 
 func (t testValue) asEllipse() testValue {
-	t.Type = &ast.Ellipsis{Elt: ast.NewIdent("string")}
+	t.Type = &ast.Ellipsis{Elt: t.Type}
+	return t
+}
+
+func (t testValue) asDuration() testValue {
+	t.Type = &ast.SelectorExpr{X: ast.NewIdent("time"), Sel: ast.NewIdent("Duration")}
 	return t
 }
